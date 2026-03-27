@@ -446,10 +446,12 @@ const responseSchema = {
 };
 
 function normalizeScenarioScores(output, scenariosFromConfig, polymarketWeights = {}) {
-  const byName = new Map(output.scenarios.map((item) => [item.name, item]));
+  const byName = new Map(
+    output.scenarios.map((item) => [String(item.name || "").trim().toLowerCase(), item])
+    );
 
   const merged = scenariosFromConfig.map((scenario) => {
-    const found = byName.get(scenario.name);
+    const found = byName.get(scenario.name.toLowerCase());
     const aiScore = Number(found?.score || 0);
     const marketBoost = Number(polymarketWeights[scenario.name] || 0) * 20;
 
@@ -501,7 +503,9 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
         confidence: "Low",
         sources: []
         }))
+        
     };
+    
     }
 
   const response = await openai.responses.create({
@@ -537,6 +541,7 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
   });
 
   const parsed = JSON.parse(response.output_text);
+  console.log("RAW MODEL OUTPUT:", JSON.stringify(parsed, null, 2));
 
   const polymarket = externalSignals.find((s) => s.source === "Polymarket");
   const normalizedScenarios = normalizeScenarioScores(
