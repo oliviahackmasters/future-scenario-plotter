@@ -3,319 +3,393 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Geopolitical Scenario Tracker</title>
+  <title>Hackmasters Future Scenario Predictor</title>
   <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel-2: #1f2937;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --line: #334155;
-      --accent: #38bdf8;
-      --good: #22c55e;
-      --warn: #f59e0b;
-      --bad: #ef4444;
-      --radius: 16px;
+    :root{
+      --hm-black:#000000;
+      --hm-white:#FFFFFF;
+      --hm-copper:#D18057;
     }
 
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: transparent;
-      color: var(--text);
+    #hmTrendChat *{ box-sizing: border-box; }
+
+    #hmTrendChat{
+      font-family:"Montserrat", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
 
-    .gp-widget {
-      width: 100%;
-      max-width: 1100px;
-      margin: 0 auto;
-      background: linear-gradient(180deg, rgba(15,23,42,.98), rgba(17,24,39,.98));
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      padding: 24px;
-      box-shadow: 0 16px 48px rgba(0,0,0,.28);
+    #hmTrendChat .hm-wrap{
+      background:var(--hm-black);
+      color:var(--hm-white);
+      border:1px solid var(--hm-copper);
+      padding:18px;
+      letter-spacing:0.2px;
+      width:100%;
+      max-width:100%;
+      margin:0;
     }
 
-    .gp-header {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: flex-start;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
+    #hmTrendChat .hm-titlebar{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+      margin:0 0 14px 0;
     }
 
-    .gp-title {
-      margin: 0;
-      font-size: 28px;
-      line-height: 1.1;
-      font-weight: 700;
+    #hmTrendChat .hm-title{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin:0;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:1.2px;
+      font-size:14px;
+      color:var(--hm-white);
     }
 
-    .gp-subtitle {
-      margin: 8px 0 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.5;
-      max-width: 760px;
+    #hmTrendChat .hm-title .hm-badge{
+      display:inline-block;
+      border:1px solid var(--hm-copper);
+      padding:6px 10px;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:1.4px;
+      font-size:12px;
+      color:var(--hm-copper);
     }
 
-    .gp-status {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(56,189,248,.12);
-      border: 1px solid rgba(56,189,248,.24);
-      color: #bae6fd;
-      border-radius: 999px;
-      padding: 8px 12px;
-      font-size: 13px;
-      white-space: nowrap;
+    #hmTrendChat .hm-status{
+      font-size:12px;
+      letter-spacing:0.9px;
+      text-transform:uppercase;
+      color:rgba(255,255,255,0.85);
+      border:1px solid rgba(209,128,87,0.55);
+      padding:8px 10px;
+      min-height:36px;
+      display:flex;
+      align-items:center;
     }
 
-    .gp-grid {
-      display: grid;
-      grid-template-columns: 1.25fr .95fr;
-      gap: 18px;
+    #hmTrendChat .hm-status.is-error{
+      color:var(--hm-copper);
     }
 
-    .gp-card {
-      background: rgba(17,24,39,.9);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 18px;
+    #hmTrendChat .hm-sub{
+      margin:0 0 14px 0;
+      font-size:12px;
+      line-height:1.5;
+      color:rgba(255,255,255,0.85);
+      max-width:900px;
     }
 
-    .gp-card h2 {
-      margin: 0 0 14px;
-      font-size: 18px;
-      line-height: 1.2;
+    #hmTrendChat .hm-top-grid{
+      display:grid;
+      grid-template-columns:1.15fr 0.85fr;
+      gap:12px;
+      margin:0 0 14px 0;
+      width:100%;
+      min-width:0;
     }
 
-    .scenario-list {
-      display: grid;
-      gap: 12px;
+    #hmTrendChat .hm-card{
+      border:1px solid var(--hm-copper);
+      background:rgba(255,255,255,0.01);
+      padding:14px;
+      min-width:0;
     }
 
-    .scenario-item {
-      background: var(--panel-2);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px;
+    #hmTrendChat .hm-msg-title{
+      margin:0 0 8px 0;
+      font-size:12px;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:0.8px;
+      color:var(--hm-white);
     }
 
-    .scenario-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 10px;
+    #hmTrendChat .hm-msg-body{
+      word-break:break-word;
+      overflow-wrap:anywhere;
     }
 
-    .scenario-name {
-      font-weight: 600;
-      font-size: 15px;
+    #hmTrendChat .hm-msg-body p{
+      font-size:13px;
+      line-height:1.5;
+      margin:0 0 8px 0;
     }
 
-    .scenario-score {
-      font-size: 14px;
-      color: #e2e8f0;
+    #hmTrendChat .hm-results-grid{
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:12px;
+      width:100%;
+      max-width:100%;
+      min-width:0;
     }
 
-    .bar {
-      width: 100%;
-      height: 10px;
-      background: #0b1220;
-      border-radius: 999px;
-      overflow: hidden;
-      border: 1px solid rgba(148,163,184,.18);
+    #hmTrendChat .hm-result-card{
+      border:1px solid var(--hm-copper);
+      background:rgba(255,255,255,0.01);
+      padding:14px;
+      min-width:0;
     }
 
-    .bar > span {
-      display: block;
-      height: 100%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #38bdf8, #22c55e);
+    #hmTrendChat .hm-score-row{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      margin:0 0 10px 0;
     }
 
-    .scenario-desc {
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.45;
+    #hmTrendChat .hm-score-name{
+      font-size:13px;
+      line-height:1.4;
+      font-weight:600;
+      text-transform:uppercase;
+      letter-spacing:0.7px;
     }
 
-    .signal-table {
-      display: grid;
-      gap: 10px;
+    #hmTrendChat .hm-score-value{
+      font-size:13px;
+      color:var(--hm-copper);
+      font-weight:700;
+      white-space:nowrap;
     }
 
-    .signal-row {
-      display: grid;
-      grid-template-columns: 1.2fr .9fr .8fr;
-      gap: 10px;
-      align-items: start;
-      padding: 12px;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: var(--panel-2);
+    #hmTrendChat .hm-bar{
+      width:100%;
+      height:10px;
+      border:1px solid rgba(209,128,87,0.55);
+      background:rgba(255,255,255,0.03);
+      overflow:hidden;
     }
 
-    .signal-name {
-      font-weight: 600;
-      font-size: 14px;
+    #hmTrendChat .hm-bar > span{
+      display:block;
+      height:100%;
+      width:0;
+      background:var(--hm-copper);
     }
 
-    .signal-reading {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.4;
-      margin-top: 4px;
+    #hmTrendChat .hm-scenario-desc{
+      margin:10px 0 0 0;
+      font-size:12px;
+      line-height:1.5;
+      color:rgba(255,255,255,0.82);
     }
 
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 100px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 600;
-      border: 1px solid transparent;
+    #hmTrendChat .hm-row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      margin:10px 0;
     }
 
-    .pill.escalatory { background: rgba(239,68,68,.12); color: #fecaca; border-color: rgba(239,68,68,.22); }
-    .pill.neutral { background: rgba(148,163,184,.12); color: #cbd5e1; border-color: rgba(148,163,184,.22); }
-    .pill.deescalatory { background: rgba(34,197,94,.12); color: #bbf7d0; border-color: rgba(34,197,94,.22); }
-
-    .confidence {
-      color: #e2e8f0;
-      font-size: 13px;
-      text-align: right;
+    #hmTrendChat .hm-btn{
+      appearance:none;
+      background:transparent;
+      color:var(--hm-white);
+      border:1px solid var(--hm-copper);
+      padding:10px 12px;
+      cursor:pointer;
+      text-transform:uppercase;
+      letter-spacing:1.1px;
+      font-weight:600;
+      font-size:12px;
+      line-height:1;
+      border-radius:0;
+      transition:background 120ms linear, color 120ms linear;
+      min-height:44px;
+      box-sizing:border-box;
     }
 
-    .narrative {
-      color: #dbeafe;
-      line-height: 1.6;
-      font-size: 14px;
-      background: rgba(56,189,248,.08);
-      border: 1px solid rgba(56,189,248,.18);
-      border-radius: 14px;
-      padding: 14px;
+    #hmTrendChat .hm-btn:hover{
+      background:var(--hm-copper);
+      color:var(--hm-black);
     }
 
-    .sources {
-      display: grid;
-      gap: 8px;
-      margin-top: 14px;
+    #hmTrendChat .hm-pill{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border:1px solid rgba(209,128,87,0.55);
+      padding:6px 9px;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.8px;
+      min-width:110px;
+      color:var(--hm-white);
+      background:rgba(255,255,255,0.02);
     }
 
-    .source-link {
-      display: block;
-      color: #bae6fd;
-      text-decoration: none;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px 12px;
-      background: rgba(15,23,42,.65);
-      font-size: 13px;
+    #hmTrendChat .hm-pill.is-escalatory{
+      background:rgba(209,128,87,0.16);
+      color:var(--hm-copper);
     }
 
-    .source-link:hover { border-color: rgba(56,189,248,.4); }
-
-    .controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin: 18px 0 0;
+    #hmTrendChat .hm-pill.is-neutral{
+      color:rgba(255,255,255,0.9);
     }
 
-    .btn {
-      appearance: none;
-      border: 0;
-      border-radius: 12px;
-      padding: 10px 14px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
+    #hmTrendChat .hm-pill.is-deescalatory{
+      background:rgba(255,255,255,0.06);
+      color:var(--hm-white);
     }
 
-    .btn-primary {
-      background: var(--accent);
-      color: #082f49;
+    #hmTrendChat .hm-signals{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:10px;
+      margin:0;
     }
 
-    .btn-secondary {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--line);
+    #hmTrendChat .hm-signal-row{
+      display:grid;
+      grid-template-columns:1.3fr 0.8fr 0.8fr;
+      gap:10px;
+      align-items:start;
+      border:1px solid rgba(209,128,87,0.55);
+      background:rgba(255,255,255,0.01);
+      padding:12px;
     }
 
-    .footer-note {
-      margin-top: 16px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
+    #hmTrendChat .hm-signal-name{
+      font-size:13px;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:0.6px;
+      margin:0 0 4px 0;
     }
 
-    .loader, .error {
-      border-radius: 14px;
-      padding: 14px;
-      margin-top: 16px;
-      font-size: 14px;
+    #hmTrendChat .hm-signal-reading{
+      font-size:12px;
+      line-height:1.5;
+      color:rgba(255,255,255,0.82);
     }
 
-    .loader { background: rgba(148,163,184,.12); color: #e2e8f0; }
-    .error { background: rgba(239,68,68,.12); color: #fecaca; border: 1px solid rgba(239,68,68,.24); }
+    #hmTrendChat .hm-confidence{
+      font-size:12px;
+      line-height:1.5;
+      color:rgba(255,255,255,0.82);
+      text-transform:uppercase;
+      letter-spacing:0.7px;
+      text-align:right;
+      padding-top:6px;
+    }
 
-    @media (max-width: 860px) {
-      .gp-grid { grid-template-columns: 1fr; }
-      .signal-row { grid-template-columns: 1fr; }
-      .confidence { text-align: left; }
+    #hmTrendChat .hm-sources{
+      display:grid;
+      gap:8px;
+      margin-top:12px;
+    }
+
+    #hmTrendChat .hm-source-link{
+      display:block;
+      color:var(--hm-white);
+      text-decoration:none;
+      border:1px solid rgba(209,128,87,0.55);
+      padding:10px 12px;
+      font-size:12px;
+      line-height:1.4;
+      text-transform:uppercase;
+      letter-spacing:0.6px;
+      background:rgba(255,255,255,0.01);
+    }
+
+    #hmTrendChat .hm-source-link:hover{
+      background:rgba(209,128,87,0.12);
+      color:var(--hm-copper);
+    }
+
+    #hmTrendChat .hm-note,
+    #hmTrendChat .hm-loader,
+    #hmTrendChat .hm-error{
+      margin-top:12px;
+      border:1px solid rgba(209,128,87,0.55);
+      padding:10px 12px;
+      font-size:12px;
+      line-height:1.5;
+      text-transform:uppercase;
+      letter-spacing:0.6px;
+      background:rgba(255,255,255,0.01);
+    }
+
+    #hmTrendChat .hm-error{
+      color:var(--hm-copper);
+      display:none;
+    }
+
+    #hmTrendChat .hm-loader{
+      display:none;
+    }
+
+    @media (max-width: 980px){
+      #hmTrendChat .hm-top-grid,
+      #hmTrendChat .hm-results-grid{
+        grid-template-columns:1fr;
+      }
+    }
+
+    @media (max-width: 760px){
+      #hmTrendChat .hm-signal-row{
+        grid-template-columns:1fr;
+      }
+
+      #hmTrendChat .hm-confidence{
+        text-align:left;
+        padding-top:0;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="gp-widget" id="gpWidget">
-    <div class="gp-header">
-      <div>
-        <h1 class="gp-title">Iran Scenario Tracker</h1>
-        <p class="gp-subtitle">
-          AI scans selected sources, extracts tracked signals, and estimates which geopolitical scenario is most likely right now.
-        </p>
+  <div id="hmTrendChat">
+    <div class="hm-wrap">
+      <div class="hm-titlebar">
+        <div class="hm-title">
+          <span class="hm-badge">Hackmasters</span>
+          <span>Future Scenario Predictor</span>
+        </div>
+        <div class="hm-status" id="hmStatus">Loading latest assessment</div>
       </div>
-      <div class="gp-status" id="lastUpdated">Loading latest assessment...</div>
-    </div>
 
-    <div class="gp-grid">
-      <section class="gp-card">
-        <h2>Scenario likelihoods</h2>
-        <div class="scenario-list" id="scenarioList"></div>
+      <p class="hm-sub">
+        AI scans selected sources, extracts live signals, and weights four predefined geopolitical futures to show which scenario is most likely right now.
+      </p>
+
+      <div class="hm-top-grid">
+        <section class="hm-card">
+          <div class="hm-msg-title">Scenario likelihoods</div>
+          <div class="hm-results-grid" id="hmScenarioGrid"></div>
+        </section>
+
+        <section class="hm-card">
+          <div class="hm-msg-title">Combined assessment</div>
+          <div class="hm-msg-body" id="hmNarrative">
+            <p>Loading combined assessment.</p>
+          </div>
+
+          <div class="hm-row">
+            <button class="hm-btn" id="hmRefreshBtn">Refresh analysis</button>
+            <button class="hm-btn" id="hmSourcesBtn">Show sources</button>
+          </div>
+
+          <div class="hm-sources" id="hmSources" style="display:none"></div>
+          <div class="hm-note">Demo output only. Analyst review required for high-stakes decisions.</div>
+          <div class="hm-loader" id="hmLoader">Refreshing signals and scenario weights</div>
+          <div class="hm-error" id="hmError"></div>
+        </section>
+      </div>
+
+      <section class="hm-card">
+        <div class="hm-msg-title">Tracked signals</div>
+        <div class="hm-signals" id="hmSignalTable"></div>
       </section>
-
-      <section class="gp-card">
-        <h2>Analyst summary</h2>
-        <div class="narrative" id="narrative"></div>
-        <div class="controls">
-          <button class="btn btn-primary" id="refreshBtn">Refresh analysis</button>
-          <button class="btn btn-secondary" id="toggleSourcesBtn">Show sources</button>
-        </div>
-        <div class="sources" id="sources" style="display:none"></div>
-        <div class="footer-note">
-          Demo output only. Use analyst review for high-stakes decisions.
-        </div>
-      </section>
     </div>
-
-    <section class="gp-card" style="margin-top:18px;">
-      <h2>Tracked signals</h2>
-      <div class="signal-table" id="signalTable"></div>
-      <div id="stateMessage" class="loader" style="display:none"></div>
-      <div id="errorMessage" class="error" style="display:none"></div>
-    </section>
   </div>
 
   <script>
@@ -324,7 +398,7 @@
     const fallbackData = {
       topic: "Iran",
       updated_at: new Date().toISOString(),
-      summary: "Current signals lean toward a high-conflict regional escalation scenario. Oil and troop signals are elevated, diplomacy is weak, and there is limited evidence in this demo snapshot of outright state collapse.",
+      summary: "Current signals lean toward high regional escalation rather than managed containment. Oil and troop indicators are elevated, diplomacy is weak, and there is limited evidence in this demo snapshot of outright regime collapse.",
       scenarios: [
         {
           name: "Burning Strait",
@@ -350,31 +424,31 @@
       signals: [
         {
           name: "Oil prices",
-          reading: "Elevated and volatile relative to baseline",
+          reading: "Elevated and volatile relative to baseline.",
           direction: "escalatory",
           confidence: "High"
         },
         {
           name: "Troop deployment",
-          reading: "Increased military presence and readiness signals",
+          reading: "Increased military presence and readiness signals.",
           direction: "escalatory",
           confidence: "Medium"
         },
         {
           name: "Government stability",
-          reading: "No clear proof of state collapse in current demo snapshot",
+          reading: "No clear proof of state collapse in current demo snapshot.",
           direction: "neutral",
           confidence: "Medium"
         },
         {
           name: "Diplomacy / ceasefire",
-          reading: "Weak momentum toward de-escalation",
+          reading: "Weak momentum toward de-escalation.",
           direction: "escalatory",
           confidence: "Medium"
         },
         {
           name: "Maritime disruption",
-          reading: "Strait-related risk remains elevated",
+          reading: "Strait-related risk remains elevated.",
           direction: "escalatory",
           confidence: "High"
         }
@@ -386,17 +460,17 @@
       ]
     };
 
-    const scenarioList = document.getElementById("scenarioList");
-    const signalTable = document.getElementById("signalTable");
-    const narrative = document.getElementById("narrative");
-    const lastUpdated = document.getElementById("lastUpdated");
-    const sources = document.getElementById("sources");
-    const stateMessage = document.getElementById("stateMessage");
-    const errorMessage = document.getElementById("errorMessage");
-    const refreshBtn = document.getElementById("refreshBtn");
-    const toggleSourcesBtn = document.getElementById("toggleSourcesBtn");
+    const scenarioGrid = document.getElementById("hmScenarioGrid");
+    const signalTable = document.getElementById("hmSignalTable");
+    const narrative = document.getElementById("hmNarrative");
+    const status = document.getElementById("hmStatus");
+    const sources = document.getElementById("hmSources");
+    const loader = document.getElementById("hmLoader");
+    const error = document.getElementById("hmError");
+    const refreshBtn = document.getElementById("hmRefreshBtn");
+    const sourcesBtn = document.getElementById("hmSourcesBtn");
 
-    function formatRelative(dateString) {
+    function relativeTime(dateString) {
       const date = new Date(dateString);
       const mins = Math.max(1, Math.round((Date.now() - date.getTime()) / 60000));
       if (mins < 60) return `${mins} min ago`;
@@ -406,41 +480,51 @@
       return `${days} day${days === 1 ? "" : "s"} ago`;
     }
 
+    function directionClass(direction) {
+      if (direction === "escalatory") return "is-escalatory";
+      if (direction === "de-escalatory") return "is-deescalatory";
+      return "is-neutral";
+    }
+
     function render(data) {
-      scenarioList.innerHTML = data.scenarios.map(item => `
-        <div class="scenario-item">
-          <div class="scenario-top">
-            <div class="scenario-name">${item.name}</div>
-            <div class="scenario-score">${item.score}%</div>
+      scenarioGrid.innerHTML = (data.scenarios || []).map(item => `
+        <div class="hm-result-card">
+          <div class="hm-score-row">
+            <div class="hm-score-name">${item.name}</div>
+            <div class="hm-score-value">${item.score}%</div>
           </div>
-          <div class="bar"><span style="width:${Math.max(0, Math.min(100, item.score))}%"></span></div>
-          <div class="scenario-desc">${item.description}</div>
+          <div class="hm-bar"><span style="width:${Math.max(0, Math.min(100, item.score))}%"></span></div>
+          <div class="hm-scenario-desc">${item.description}</div>
         </div>
       `).join("");
 
-      signalTable.innerHTML = data.signals.map(signal => `
-        <div class="signal-row">
+      signalTable.innerHTML = (data.signals || []).map(signal => `
+        <div class="hm-signal-row">
           <div>
-            <div class="signal-name">${signal.name}</div>
-            <div class="signal-reading">${signal.reading}</div>
+            <div class="hm-signal-name">${signal.name}</div>
+            <div class="hm-signal-reading">${signal.reading}</div>
           </div>
-          <div><span class="pill ${signal.direction}">${signal.direction}</span></div>
-          <div class="confidence">Confidence: ${signal.confidence}</div>
+          <div>
+            <span class="hm-pill ${directionClass(signal.direction)}">${signal.direction}</span>
+          </div>
+          <div class="hm-confidence">Confidence: ${signal.confidence}</div>
         </div>
       `).join("");
 
-      narrative.textContent = data.summary;
-      lastUpdated.textContent = `Updated ${formatRelative(data.updated_at)}`;
+      narrative.innerHTML = `<p>${data.summary}</p>`;
+      status.textContent = `Updated ${relativeTime(data.updated_at)}`;
+      status.classList.remove("is-error");
 
       sources.innerHTML = (data.sources || []).map(source => `
-        <a class="source-link" href="${source.url}" target="_blank" rel="noopener noreferrer">${source.title}</a>
+        <a class="hm-source-link" href="${source.url}" target="_blank" rel="noopener noreferrer">${source.title}</a>
       `).join("");
     }
 
     async function loadAssessment() {
-      errorMessage.style.display = "none";
-      stateMessage.style.display = "block";
-      stateMessage.textContent = "Refreshing latest signals and scenario scores...";
+      loader.style.display = "block";
+      error.style.display = "none";
+      status.textContent = "Refreshing assessment";
+      status.classList.remove("is-error");
 
       try {
         const res = await fetch(API_URL, {
@@ -451,20 +535,22 @@
         if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
         const data = await res.json();
         render(data);
-        stateMessage.style.display = "none";
       } catch (err) {
         render(fallbackData);
-        stateMessage.style.display = "none";
-        errorMessage.style.display = "block";
-        errorMessage.textContent = `Live API unavailable, showing fallback demo data. ${err.message}`;
+        error.style.display = "block";
+        error.textContent = `Live API unavailable. Showing fallback demo data. ${err.message}`;
+        status.textContent = "Fallback demo mode";
+        status.classList.add("is-error");
+      } finally {
+        loader.style.display = "none";
       }
     }
 
     refreshBtn.addEventListener("click", loadAssessment);
-    toggleSourcesBtn.addEventListener("click", () => {
-      const isHidden = sources.style.display === "none";
-      sources.style.display = isHidden ? "grid" : "none";
-      toggleSourcesBtn.textContent = isHidden ? "Hide sources" : "Show sources";
+    sourcesBtn.addEventListener("click", () => {
+      const hidden = sources.style.display === "none";
+      sources.style.display = hidden ? "grid" : "none";
+      sourcesBtn.textContent = hidden ? "Hide sources" : "Show sources";
     });
 
     loadAssessment();
