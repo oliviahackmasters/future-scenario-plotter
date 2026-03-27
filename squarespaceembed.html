@@ -345,13 +345,17 @@
       }
     }
 
+/* ------------------------------------------ */
+/* PLOTTER */
+/* ------------------------------------------ */
+
 #hmScenarioPlotter .hm-plotter{
   margin-top:14px;
 }
 
 #hmScenarioPlotter .hm-plot-shell{
   position:relative;
-  padding:42px 56px 42px 56px;
+  padding:24px 32px 24px 32px; /* was 42 / 56 */
 }
 
 #hmScenarioPlotter .hm-plot-grid{
@@ -364,8 +368,8 @@
 
 #hmScenarioPlotter .hm-plot-cell{
   border:1px solid var(--hm-copper);
-  min-height:250px;
-  padding:26px 22px;
+  min-height:140px; /* was 250px */
+  padding:16px 14px; /* was 26 / 22 */
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -375,22 +379,22 @@
 }
 
 #hmScenarioPlotter .hm-plot-cell-title{
-  font-size:18px;
+  font-size:14px; /* was 18px */
   line-height:1.2;
   font-weight:700;
   text-transform:uppercase;
   letter-spacing:1.4px;
   color:var(--hm-white);
-  margin:0 0 18px 0;
+  margin:0 0 10px 0;
 }
 
 #hmScenarioPlotter .hm-plot-cell-desc{
-  font-size:12px;
+  font-size:10px; /* was 12px */
   line-height:1.6;
   text-transform:uppercase;
   letter-spacing:1.1px;
   color:rgba(255,255,255,0.92);
-  max-width:280px;
+  max-width:200px;
 }
 
 #hmScenarioPlotter .hm-plot-axis{
@@ -416,14 +420,14 @@
 }
 
 #hmScenarioPlotter .hm-plot-axis-left{
-  left: -40px;
+  left: -60px;
   top: 50%;
   transform: translateY(-50%) rotate(-90deg);
   transform-origin: center;
 }
 
 #hmScenarioPlotter .hm-plot-axis-right{
-  right: -38px;
+  right: -60px;
   top: 50%;
   transform: translateY(-50%) rotate(90deg);
   transform-origin: center;
@@ -466,6 +470,12 @@
     letter-spacing:1px;
   }
 }
+
+/* ------------------------------------------ */
+/* SOURCES  */
+/* ------------------------------------------ */
+
+
 
 #hmScenarioPlotter .hm-signal-sources{
   margin-top:10px;
@@ -670,7 +680,7 @@
       <div class="hm-titlebar">
         <div class="hm-title">
           <span class="hm-badge">Hackmasters</span>
-          <span>Future Scenario Predictor</span>
+          <span>Future Scenario Plotter</span>
         </div>
         <div class="hm-status" id="hmStatus">Loading latest assessment</div>
       </div>
@@ -678,6 +688,24 @@
       <p class="hm-sub">
         AI scans selected sources, extracts live signals, and weights four predefined geopolitical futures to show which scenario is most likely right now.
       </p>
+       <section class="hm-card">
+      <button class="hm-btn" id="hmRefreshBtn">Refresh analysis</button>
+  <div class="hm-source-manager">
+            <div class="hm-msg-title">Manage Sources</div>
+
+            <div class="hm-source-form">
+              <input class="hm-source-input" id="hmSourceName" placeholder="Source name" />
+              <input class="hm-source-input" id="hmSourceUrl" placeholder="RSS or API URL" />
+              <select class="hm-source-input" id="hmSourceType">
+                <option value="rss">RSS</option>
+                <option value="api">API</option>
+              </select>
+              <button class="hm-btn" id="hmAddSourceBtn">Add source</button>
+            </div>
+
+            <div class="hm-saved-sources" id="hmSavedSources"></div>
+</div>
+</section>
 
       <div class="hm-top-grid">
         <section class="hm-card">
@@ -726,8 +754,6 @@
 </div>
         </section>
 
-        
-
         <section class="hm-card">
           <div class="hm-msg-title">Combined assessment</div>
           <div class="hm-msg-body" id="hmNarrative">
@@ -736,24 +762,10 @@
 
           <div class="hm-row">
             <div class="hm-row">
-              <button class="hm-btn" id="hmRefreshBtn">Refresh analysis</button>
+              
               <button class="hm-btn" id="hmSourcesBtn">Show sources</button>
             </div>
-            <div class="hm-source-manager">
-            <div class="hm-msg-title">Manage Sources</div>
-
-            <div class="hm-source-form">
-              <input class="hm-source-input" id="hmSourceName" placeholder="Source name" />
-              <input class="hm-source-input" id="hmSourceUrl" placeholder="RSS or API URL" />
-              <select class="hm-source-input" id="hmSourceType">
-                <option value="rss">RSS</option>
-                <option value="api">API</option>
-              </select>
-              <button class="hm-btn" id="hmAddSourceBtn">Add source</button>
-            </div>
-
-            <div class="hm-saved-sources" id="hmSavedSources"></div>
-</div>
+          
           </div>
 
           <div class="hm-sources" id="hmSources" style="display:none"></div>

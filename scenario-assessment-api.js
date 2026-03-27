@@ -60,7 +60,7 @@ const TOPICS = {
       {
         name: "Reuters World",
         type: "rss",
-        url: "https://feeds.reuters.com/Reuters/worldNews",
+        url: "https://www.reutersagency.com/feed/?best-topics=world&post_type=best",
       },
     ],
     keywordFilter: [
@@ -120,21 +120,69 @@ async function fetchRssItems(source, keywordFilter) {
   }
 }
 
-async function collectTopicCoverage(topicConfig) {
-  const itemGroups = await Promise.all(
-    topicConfig.sources.map((source) => fetchRssItems(source, topicConfig.keywordFilter))
+async function collectTopicCoverage(topicConfig, savedSources = []) {
+  const allSources = [
+    ...topicConfig.sources,
+    ...savedSources.filter((s) => s.enabled !== false)
+  ];
+  
+
+  const uniqueSources = Array.from(
+    new Map(allSources.map((source) => [source.url, source])).values()
   );
 
-  const allItems = itemGroups.flat();
-  const filtered = scoreAndSort(allItems).slice(0, 15);
+  const rssSources = uniqueSources.filter((source) => source.type === "rss" || !source.type);
+
+  console.log("RSS SOURCES USED:", rssSources.map(s => ({
+    name: s.name,
+    url: s.url,
+    type: s.type || "rss"
+  })));
+
+  const itemGroups = await Promise.all(
+    rssSources.map((source) => fetchRssItems(source, topicConfig.keywordFilter))
+  );
+
+  const flattened = itemGroups.flat();
+
+  console.log(
+    "FETCHED ARTICLE COUNTS BY SOURCE:",
+    flattened.reduce((acc, item) => {
+      acc[item.source] = (acc[item.source] || 0) + 1;
+      return acc;
+    }, {})
+  );
+
+  const scored = scoreAndSort(flattened);
+const filtered = capPerSource(scored, 4).slice(0, 25);
+
+  console.log(
+    "FINAL FILTERED SOURCES:",
+    filtered.map(item => item.source)
+  );
 
   return filtered.map((item) => ({
     source: item.source,
     url: item.url,
     title: item.title,
     published_at: item.isoDate,
-    snippet: item.contentSnippet || item.content,
+    snippet: item.contentSnippet || item.content
   }));
+}
+
+function capPerSource(items, maxPerSource = 4) {
+  const counts = new Map();
+  const result = [];
+
+  for (const item of items) {
+    const count = counts.get(item.source) || 0;
+    if (count < maxPerSource) {
+      result.push(item);
+      counts.set(item.source, count + 1);
+    }
+  }
+
+  return result;
 }
 
 function buildPrompt(topicConfig, articles) {
@@ -198,7 +246,7 @@ const responseSchema = {
             reading: { type: "string" },
             direction: {
               type: "string",
-              enum: ["escalatory", "neutral", "de-escalatory"],
+              enum: ["rising", "stable", "falling"],
             },
             confidence: {
               type: "string",
