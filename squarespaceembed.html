@@ -678,6 +678,7 @@
 
   <script>
     const API_URL = window.HM_SCENARIO_API_URL || "https://future-scenario-predictor.vercel.app/api/scenario-assessment?topic=iran";
+    const SOURCES_API_URL = window.HM_SOURCES_API_URL || "https://future-scenario-predictor.vercel.app/api/sources?topic=iran";
 
     const fallbackData = {
       topic: "Iran",
@@ -753,6 +754,11 @@
     const error = document.getElementById("hmError");
     const refreshBtn = document.getElementById("hmRefreshBtn");
     const sourcesBtn = document.getElementById("hmSourcesBtn");
+    const sourceNameInput = document.getElementById("hmSourceName");
+const sourceUrlInput = document.getElementById("hmSourceUrl");
+const sourceTypeInput = document.getElementById("hmSourceType");
+const addSourceBtn = document.getElementById("hmAddSourceBtn");
+const savedSourcesEl = document.getElementById("hmSavedSources");
 
     function relativeTime(dateString) {
       const date = new Date(dateString);
@@ -845,6 +851,99 @@
       sources.style.display = hidden ? "grid" : "none";
       sourcesBtn.textContent = hidden ? "Hide sources" : "Show sources";
     });
+
+    function renderSavedSources(items) {
+  savedSourcesEl.innerHTML = (items || []).map((item) => `
+    <div class="hm-saved-source">
+      <div class="hm-saved-source-meta">
+        <div class="hm-saved-source-name">${item.name} ${item.enabled === false ? "(disabled)" : ""}</div>
+        <div class="hm-saved-source-url">${item.url}</div>
+      </div>
+
+      <button class="hm-source-mini-btn" data-action="toggle" data-id="${item.id}">
+        ${item.enabled === false ? "Enable" : "Disable"}
+      </button>
+
+      <button class="hm-source-mini-btn" data-action="delete" data-id="${item.id}">
+        Delete
+      </button>
+    </div>
+  `).join("");
+}
+
+async function loadSavedSources() {
+  try {
+    const res = await fetch(SOURCES_API_URL, {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+
+    if (!res.ok) throw new Error(`Failed to load sources: ${res.status}`);
+    const data = await res.json();
+    renderSavedSources([...(data.global || []), ...(data.topic || [])]);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function addSource() {
+  const name = sourceNameInput.value.trim();
+  const url = sourceUrlInput.value.trim();
+  const type = sourceTypeInput.value;
+
+  if (!name || !url) return;
+
+  const res = await fetch(SOURCES_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, url, type, enabled: true })
+  });
+
+  if (!res.ok) {
+    console.error("Failed to save source");
+    return;
+  }
+
+  sourceNameInput.value = "";
+  sourceUrlInput.value = "";
+  sourceTypeInput.value = "rss";
+
+  await loadSavedSources();
+}
+
+savedSourcesEl.addEventListener("click", async (event) => {
+  const btn = event.target.closest("[data-action]");
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+
+  if (action === "delete") {
+    await fetch(SOURCES_API_URL, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    });
+    await loadSavedSources();
+    return;
+  }
+
+  if (action === "toggle") {
+    const currentRow = btn.closest(".hm-saved-source");
+    const isDisabled = currentRow?.textContent.includes("(disabled)");
+
+    await fetch(SOURCES_API_URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, enabled: isDisabled })
+    });
+
+    await loadSavedSources();
+  }
+});
+
+addSourceBtn.addEventListener("click", addSource);
+loadSavedSources();
 
     loadAssessment();
   </script>

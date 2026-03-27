@@ -5,18 +5,6 @@ import { getMergedSavedSources } from "../lib/source-store.js";
 const parser = new Parser();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-import { createClient } from 'redis';
-import { NextResponse } from 'next/server';
-
-const redis = await createClient().connect();
-
-export const POST = async () => {
-  // Fetch data from Redis
-  const result = await redis.get("item");
-  
-  // Return the result in the response
-  return new NextResponse(JSON.stringify({ result }), { status: 200 });
-};
 
 const TOPICS = {
   iran: {
@@ -139,11 +127,25 @@ async function collectTopicCoverage(topicConfig, savedSources = []) {
     ...savedSources.filter((s) => s.enabled !== false)
   ];
 
-  const rssSources = allSources.filter((source) => source.type === "rss" || !source.type);
+  const uniqueSources = Array.from(
+    new Map(allSources.map((source) => [source.url, source])).values()
+  );
+
+  const rssSources = uniqueSources.filter((source) => source.type === "rss" || !source.type);
 
   const itemGroups = await Promise.all(
     rssSources.map((source) => fetchRssItems(source, topicConfig.keywordFilter))
   );
+
+  const filtered = scoreAndSort(itemGroups.flat()).slice(0, 15);
+
+  return filtered.map((item) => ({
+    source: item.source,
+    url: item.url,
+    title: item.title,
+    published_at: item.isoDate,
+    snippet: item.contentSnippet || item.content
+  }));
 }
 
 async function fetchOilSignal() {
@@ -283,11 +285,17 @@ async function fetchPolymarketSignal(topicConfig) {
     const matchedMarkets = [];
 
     for (const market of filtered) {
-      const outcomePrices = Array.isArray(market.outcomePrices)
-        ? market.outcomePrices
-        : typeof market.outcomePrices === "string"
-          ? JSON.parse(market.outcomePrices || "[]")
-          : [];
+    let outcomePrices = [];
+
+    if (Array.isArray(market.outcomePrices)) {
+    outcomePrices = market.outcomePrices;
+    } else if (typeof market.outcomePrices === "string") {
+    try {
+        outcomePrices = JSON.parse(market.outcomePrices || "[]");
+    } catch {
+        outcomePrices = [];
+    }
+    }
 
       const yesPrice = Number(outcomePrices[0] || 0);
       const mapped = scorePolymarketScenario(market.question, yesPrice);
@@ -336,72 +344,6 @@ async function fetchPolymarketSignal(topicConfig) {
   }
 }
 
-async function fetchSocialSignal(topicConfig) {
-  const endpoint = process.env.SOCIAL_SIGNAL_ENDPOINT;
-  if (!endpoint) {
-    return {
-      source: "Social",
-      status: "unavailable",
-      items: [],
-      signal: {
-        name: "social early warning",
-        reading: "No social signal endpoint configured.",
-        direction: "neutral",
-        confidence: "Low"
-      }
-    };
-  }
-
-  try {
-    const data = await fetchJson(endpoint);
-    const items = Array.isArray(data.items) ? data.items : [];
-    const filtered = items
-      .filter((item) => {
-        const text = `${item.text || ""} ${item.title || ""}`.toLowerCase();
-        return topicConfig.keywordFilter.some((term) => text.includes(term));
-      })
-      .slice(0, 12);
-
-    const alertCount = filtered.filter((item) => item.severity === "high").length;
-    let direction = "neutral";
-    let confidence = "Low";
-    let reading = "Social layer shows limited early warning activity.";
-
-    if (alertCount >= 3) {
-      direction = "escalatory";
-      confidence = "Medium";
-      reading = `${alertCount} high-severity social signals matched the topic in the latest batch.`;
-    } else if (filtered.length >= 5) {
-      confidence = "Medium";
-      reading = `${filtered.length} social items matched the topic, but without a strong high-severity cluster.`;
-    }
-
-    return {
-      source: "Social",
-      status: "ok",
-      items: filtered,
-      signal: {
-        name: "social early warning",
-        reading,
-        direction,
-        confidence
-      }
-    };
-  } catch (error) {
-    console.error("Social signal failed:", error.message);
-    return {
-      source: "Social",
-      status: "error",
-      items: [],
-      signal: {
-        name: "social early warning",
-        reading: `Social layer unavailable: ${error.message}`,
-        direction: "neutral",
-        confidence: "Low"
-      }
-    };
-  }
-}
 
 function buildPrompt(topicConfig, articles, externalSignals) {
   return [
@@ -429,7 +371,7 @@ function buildPrompt(topicConfig, articles, externalSignals) {
     "9. For each signal source, return title, url, and source name.",
     "10. Use the structured external signals as additional context, especially for oil prices and prediction market odds.",
     "11. If narrative reporting and external signals conflict, mention that in the summary or relevant signal reading.",
-    "12 Treat direct oil-market reporting from Financial Times as a preferred narrative source for the oil prices signal.",
+    "12. Treat direct oil-market reporting from Financial Times as a preferred narrative source for the oil prices signal.",
     "Output requirements:",
     "- Return valid JSON matching the required schema.",
     "- Every signal must include: name, reading, direction, confidence, and sources.",
@@ -547,19 +489,20 @@ function upsertSignal(signals, newSignal) {
 async function generateScenarioAssessment(topicConfig, articles, externalSignals) {
   if (!articles.length && !externalSignals.length) {
     return {
-      summary: "Not enough current source material was available to generate a live assessment.",
-      scenarios: topicConfig.scenarios.map((scenario, index) => ({
+        summary: "Not enough current source material was available to generate a live assessment.",
+        scenarios: topicConfig.scenarios.map((scenario) => ({
         ...scenario,
-        score: index === topicConfig.scenarios.length - 1 ? 25 : 25
-      })),
-      signals: topicConfig.trackedSignals.map((signal) => ({
+        score: 25
+        })),
+        signals: topicConfig.trackedSignals.map((signal) => ({
         name: signal,
         reading: "No recent evidence available in current fetch.",
         direction: "neutral",
-        confidence: "Low"
-      }))
+        confidence: "Low",
+        sources: []
+        }))
     };
-  }
+    }
 
   const response = await openai.responses.create({
     model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
@@ -635,37 +578,37 @@ export default async function handler(req, res) {
 
     const savedSources = await getMergedSavedSources(req.query.topic || "iran");
 
-    const [articles, oilSignal, polymarketSignal] = await Promise.all([
-    collectTopicCoverage(topicConfig, savedSources),
-    fetchOilSignal(),
-    fetchPolymarketSignal(topicConfig)
-    ]);
+const [articles, oilSignal, polymarketSignal] = await Promise.all([
+  collectTopicCoverage(topicConfig, savedSources),
+  fetchOilSignal(),
+  fetchPolymarketSignal(topicConfig)
+]);
 
-    const externalSignals = [oilSignal, polymarketSignal];
-    const assessment = await generateScenarioAssessment(topicConfig, articles, externalSignals);
+const externalSignals = [oilSignal, polymarketSignal];
+const assessment = await generateScenarioAssessment(topicConfig, articles, externalSignals);
 
-    return json(res, 200, {
-      topic: topicConfig.label,
-      updated_at: new Date().toISOString(),
-      summary: assessment.summary,
-      scenarios: assessment.scenarios,
-      signals: assessment.signals,
-      sources: [
-        ...articles.map((article) => ({
-          title: `${article.source}: ${article.title}`,
-          url: article.url
-        })),
-        { title: "Polymarket live markets", url: "https://polymarket.com/" }
-      ],
-      meta: {
-        oil: oilSignal,
-        polymarket: {
-            source: polymarketSignal.source,
-            matchedMarkets: polymarketSignal.matchedMarkets
-        },
-        saved_sources: savedSources
-        }
-    });
+return json(res, 200, {
+  topic: topicConfig.label,
+  updated_at: new Date().toISOString(),
+  summary: assessment.summary,
+  scenarios: assessment.scenarios,
+  signals: assessment.signals,
+  sources: [
+    ...articles.map((article) => ({
+      title: `${article.source}: ${article.title}`,
+      url: article.url
+    })),
+    { title: "Polymarket live markets", url: "https://polymarket.com/" }
+  ],
+  meta: {
+    oil: oilSignal,
+    polymarket: {
+      source: polymarketSignal.source,
+      matchedMarkets: polymarketSignal.matchedMarkets
+    },
+    saved_sources: savedSources
+  }
+});
   } catch (error) {
     console.error("Scenario assessment failed:", error);
     return json(res, 500, {

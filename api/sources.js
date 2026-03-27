@@ -62,9 +62,7 @@ export default async function handler(req, res) {
       const body = parseBody(req);
 
       if (!body.id) {
-        return json(res, 400, {
-          error: "missing_id"
-        });
+        return json(res, 400, { error: "missing_id" });
       }
 
       const next = await updateSource(
@@ -85,9 +83,7 @@ export default async function handler(req, res) {
       const body = parseBody(req);
 
       if (!body.id) {
-        return json(res, 400, {
-          error: "missing_id"
-        });
+        return json(res, 400, { error: "missing_id" });
       }
 
       const next = await deleteSource(body.id, topic);
