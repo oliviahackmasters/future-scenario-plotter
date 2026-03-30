@@ -12,28 +12,59 @@ const TOPICS = {
     scenarios: [
       {
         name: "Chaos + Collapse",
-        description: "Multi-state regional war and a dysfunctional government in Iran."
+        description: "Multi-state regional war and a dysfunctional government in Iran.",
+        gccReality: "Extreme security volatility, refugee flows, cross-border instability, oil system shock, and global recession risk.",
+        scenarioSignals: [
+          "loss of central command in Iran",
+          "multiple armed factions emerge",
+          "war spills across Iraq, Lebanon, and the Gulf simultaneously"
+        ]
       },
       {
         name: "Shattered Diplomacy",
-        description: "Post-Iran fragmentation and multiple weak political actors."
+        description: "Security threat reduces in the short term, but long-term uncertainty rises through ungoverned spaces in Iran and militia proliferation.",
+        gccReality: "Security threat reduces short term but long-term uncertainty rises through ungoverned spaces in Iran and militias.",
+        scenarioSignals: [
+          "leadership fractures",
+          "internal uprising or regime weakening",
+          "reduced coordination of external attacks"
+        ]
       },
       {
         name: "Burning Strait",
-        description: "Full regional war with no major ideological change in Iran."
+        description: "The Gulf becomes an active war theatre, with severe energy-export disruption and mounting internal stability pressure.",
+        gccReality: "Active war theatre, energy exports severely disrupted, civil defence activation, and internal stability pressures.",
+        scenarioSignals: [
+          "long-term Hormuz closure",
+          "direct GCC military retaliation",
+          "large-scale infrastructure strikes"
+        ]
       },
       {
         name: "Cold Containment",
-        description: "Managed escalation with minimal or no ground troops."
+        description: "Managed escalation with constant security pressure, rising defence costs, and disrupted but still functioning oil flows.",
+        gccReality: "Constant security pressure, rising defence costs, economic resilience but slow growth.",
+        scenarioSignals: [
+          "repeated ceasefire attempts",
+          "limited symbolic retaliation",
+          "oil flows disrupted but not halted"
+        ]
       }
     ],
     trackedSignals: [
       "oil prices",
+      "oil flows",
       "troop deployment",
       "government stability",
+      "leadership fractures",
+      "central command cohesion",
       "diplomacy / ceasefire",
       "maritime disruption",
-      "protests / elite fragmentation",
+      "infrastructure strikes",
+      "protests / internal uprising",
+      "external attack coordination",
+      "armed faction emergence",
+      "regional spillover",
       "prediction market odds"
     ],
     sources: [
@@ -47,22 +78,35 @@ const TOPICS = {
         { name: "Guardian World", url: "https://www.theguardian.com/world/rss" }
     ],
     keywordFilter: [
-        "iran",
-        "tehran",
-        "strait of hormuz",
-        "hormuz",
-        "israel",
-        "us military",
-        "troops",
-        "oil",
-        "ceasefire",
-        "sanctions",
-        "gulf",
-        "missile",
-        "airstrike",
-        "shipping",
-        "energy"
-        ],
+      "iran",
+      "tehran",
+      "strait of hormuz",
+      "hormuz",
+      "gulf",
+      "gcc",
+      "israel",
+      "iraq",
+      "lebanon",
+      "militia",
+      "militias",
+      "troops",
+      "oil",
+      "oil flows",
+      "energy",
+      "refugee",
+      "ceasefire",
+      "retaliation",
+      "infrastructure",
+      "airstrike",
+      "missile",
+      "uprising",
+      "leadership",
+      "regime",
+      "command",
+      "factions",
+      "shipping",
+      "sanctions"
+    ],
     polymarketSearchTerms: [
       "iran",
       "hormuz",
@@ -255,8 +299,12 @@ function scorePolymarketScenario(question, yesPrice) {
 
   if (
     q.includes("hormuz") ||
+    q.includes("shipping") ||
+    q.includes("gulf war") ||
     q.includes("regional war") ||
-    q.includes("iran") && q.includes("israel") && q.includes("war")
+    (q.includes("iran") && q.includes("israel") && q.includes("war")) ||
+    q.includes("gcc retaliation") ||
+    q.includes("infrastructure strike")
   ) {
     return { scenario: "Burning Strait", weight: p };
   }
@@ -265,7 +313,10 @@ function scorePolymarketScenario(question, yesPrice) {
     q.includes("regime collapse") ||
     q.includes("government collapse") ||
     q.includes("iran collapse") ||
-    q.includes("supreme leader removed")
+    q.includes("supreme leader removed") ||
+    q.includes("multiple factions") ||
+    q.includes("civil war") ||
+    q.includes("state failure")
   ) {
     return { scenario: "Chaos + Collapse", weight: p };
   }
@@ -274,16 +325,18 @@ function scorePolymarketScenario(question, yesPrice) {
     q.includes("deal") ||
     q.includes("ceasefire") ||
     q.includes("talks") ||
-    q.includes("negotiation")
+    q.includes("negotiation") ||
+    q.includes("limited retaliation")
   ) {
     return { scenario: "Cold Containment", weight: 1 - p };
   }
 
   if (
-    q.includes("fragment") ||
     q.includes("fragmentation") ||
-    q.includes("multiple governments") ||
-    q.includes("power vacuum")
+    q.includes("leadership fracture") ||
+    q.includes("power vacuum") ||
+    q.includes("militia") ||
+    q.includes("ungoverned")
   ) {
     return { scenario: "Shattered Diplomacy", weight: p };
   }
@@ -385,7 +438,8 @@ function buildPrompt(topicConfig, articles, externalSignals) {
     "",
     "Scenarios:",
     ...topicConfig.scenarios.map(
-      (scenario, index) => `${index + 1}. ${scenario.name} = ${scenario.description}`
+      (scenario, index) =>
+        `${index + 1}. ${scenario.name} = ${scenario.description} GCC reality: ${scenario.gccReality}. Key scenario signals: ${scenario.scenarioSignals.join(", ")}.`
     ),
     "Use these exact scenario names in the scenarios array and calculation array:",
     "- Chaos + Collapse",
@@ -406,6 +460,10 @@ function buildPrompt(topicConfig, articles, externalSignals) {
     "10. Use the structured external signals as additional context, especially for oil prices and prediction market odds.",
     "11. If narrative reporting and external signals conflict, mention that in the summary or relevant signal reading.",
     "12. Treat direct oil-market reporting from Financial Times as a preferred narrative source for the oil prices signal.",
+    "13. Interpret each scenario through the GCC lens given in the scenario definitions.",
+    "14. Pay close attention to whether oil flows are disrupted versus fully halted.",
+    "15. Distinguish between regime weakening, leadership fractures, and full loss of central command.",
+    "16. Distinguish between limited symbolic retaliation and direct GCC military retaliation.",
     "Output requirements:",
     "",
     "- Return valid JSON matching the required schema.",
