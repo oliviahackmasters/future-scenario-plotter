@@ -68,10 +68,10 @@ const TOPICS = {
       "prediction market odds"
     ],
     sources: [
-        { name: "BBC World", url: "http://feeds.bbci.co.uk/news/world/rss.xml" },
+        // { name: "BBC World", url: "http://feeds.bbci.co.uk/news/world/rss.xml" },
         { name: "BBC Middle East", url: "http://feeds.bbci.co.uk/news/world/middle_east/rss.xml" },
-        { name: "Reuters World", url: "https://www.reutersagency.com/feed/?best-topics=world&post_type=best" },
-        { name: "FT Markets", url: "https://www.ft.com/markets?format=rss" },
+        // { name: "Reuters World", url: "https://www.reutersagency.com/feed/?best-topics=world&post_type=best" },
+        // { name: "FT Markets", url: "https://www.ft.com/markets?format=rss" },
         { name: "FT Oil", url: "https://www.ft.com/oil?format=rss" },
         { name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
         { name: "FT Energy", url: "https://www.ft.com/energy?format=rss" },
@@ -158,7 +158,7 @@ async function fetchRssItems(source, keywordFilter) {
   try {
     const feed = await parser.parseURL(source.url);
     const items = Array.isArray(feed.items) ? feed.items : [];
-    return items.slice(0, 12).map((item) => ({
+    return items.slice(0, 6).map((item) => ({
       source: source.name,
       url: item.link || source.url,
       title: normalizeWhitespace(item.title),
@@ -205,7 +205,7 @@ async function collectTopicCoverage(topicConfig, savedSources = []) {
     }, {})
   );
 
-  const filtered = scoreAndSort(flattened).slice(0, 15);
+  const filtered = scoreAndSort(flattened).slice(0, 8);
 
   console.log(
     "FINAL FILTERED SOURCES:",
@@ -217,7 +217,7 @@ async function collectTopicCoverage(topicConfig, savedSources = []) {
     url: item.url,
     title: item.title,
     published_at: item.isoDate,
-    snippet: item.contentSnippet || item.content
+    snippet: String(item.contentSnippet || item.content || "").slice(0, 300)
   }));
 }
 

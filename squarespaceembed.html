@@ -327,7 +327,7 @@
     #hmScenarioPlotter .hm-loader{
       display:none;
       margin-top:12px;
-      border:1px solid rgba(209,128,87,0.55);
+      /* border:1px solid rgba(209,128,87,0.55); */
       padding:22px 12px;
       background:rgba(255,255,255,0.01);
       text-align:center;
@@ -345,7 +345,7 @@
   position:relative;
   overflow:hidden;
   background:
-    radial-gradient(circle at 50% 50%, rgba(209,128,87,0.18), transparent 60%),
+    radial-gradient(circle at 50% 50%, rgba(209,128,87,0.18), transparent 40%),
     radial-gradient(circle at 50% 50%, rgba(255,255,255,0.08) 2px, transparent 2px),
     radial-gradient(circle at 50% 50%, rgba(255,255,255,0.08) 4px, transparent 4px);
   box-shadow:
@@ -770,6 +770,9 @@
       <div class="hm-top-grid">
         <section class="hm-card">
           <div class="hm-msg-title">Scenario likelihoods</div>
+          <div class="hm-loader" id="hmLoader" style="display:none">
+            <div class="hm-loader-radar" aria-hidden="true"></div>
+          </div>
           <div class="hm-results-grid" id="hmScenarioGrid"></div>
 
           <div class="hm-row">
@@ -830,10 +833,8 @@
 
           <div class="hm-sources" id="hmSources" style="display:none"></div>
           <div class="hm-note">Demo output only. Analyst review required for high-stakes decisions.</div>
-          <div class="hm-loader" id="hmLoader" style="display:none">
-            <div class="hm-loader-radar" aria-hidden="true"></div>
-            <div class="hm-loader-text">Refreshing signals and scenario weights</div>
-          </div>
+          <div class="hm-loader-text">Refreshing signals and scenario weights</div>
+          
           <div class="hm-error" id="hmError"></div>
         </section>
       </div>
