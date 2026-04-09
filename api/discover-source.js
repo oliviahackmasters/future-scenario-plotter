@@ -1,145 +1,133 @@
-import { createClient } from "redis";
+import { findCatalogSourceByName } from "../lib/source-catalog.js";
+import {
+  discoverFeedFromWebsite,
+  validateKnownFeed
+} from "../lib/feed-discovery.js";
 
-const GLOBAL_SOURCES_KEY = "scenario:sources:global";
+function getAllowedOrigin(req) {
+  const requestOrigin = req.headers.origin || "";
+  const configured = String(process.env.ALLOWED_ORIGIN || "").trim();
 
-function normalizeTopic(topic) {
-  return String(topic || "global").trim().toLowerCase();
+  if (!configured) return "*";
+  if (configured === "*") return "*";
+  if (requestOrigin && requestOrigin === configured) return configured;
+
+  return configured;
 }
 
-function topicKey(topic) {
-  return `scenario:sources:${normalizeTopic(topic)}`;
+function setCors(req, res) {
+  const origin = getAllowedOrigin(req);
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-function isRedisConfigured() {
-  return !!process.env.REDIS_URL;
+function json(req, res, status, body) {
+  setCors(req, res);
+  res.status(status).setHeader("Content-Type", "application/json");
+  res.send(JSON.stringify(body));
 }
 
-let redisClientPromise = null;
+function parseBody(req) {
+  if (typeof req.body === "object" && req.body !== null) return req.body;
+  try {
+    return JSON.parse(req.body || "{}");
+  } catch {
+    return {};
+  }
+}
 
-async function getRedis() {
-  if (!isRedisConfigured()) {
-    throw new Error("Redis is not configured. Missing REDIS_URL.");
+export default async function handler(req, res) {
+  if (req.method === "OPTIONS") {
+    return json(req, res, 200, { ok: true });
   }
 
-  if (!redisClientPromise) {
-    const client = createClient({
-      url: process.env.REDIS_URL
-    });
-
-    client.on("error", (err) => {
-      console.error("Redis client error:", err);
-    });
-
-    redisClientPromise = client.connect().then(() => client);
+  if (req.method !== "POST") {
+    return json(req, res, 405, { error: "method_not_allowed" });
   }
-
-  return redisClientPromise;
-}
-
-function sanitizeSource(source = {}) {
-  return {
-    id: source.id || crypto.randomUUID(),
-    name: String(source.name || "").trim(),
-    url: String(source.url || "").trim(),
-    type: String(source.type || "rss").trim().toLowerCase(),
-    enabled: source.enabled !== false,
-    homepage: String(source.homepage || "").trim(),
-    confidence: Number(source.confidence || 0),
-    discovered_by: String(source.discovered_by || "manual").trim(),
-    validated_at: source.validated_at || null,
-    created_at: source.created_at || new Date().toISOString()
-  };
-}
-
-async function getJson(key) {
-  const redis = await getRedis();
-  const raw = await redis.get(key);
-
-  if (!raw) return null;
 
   try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+    const body = parseBody(req);
+    const topic = String(req.query.topic || body.topic || "iran").trim();
+    const name = String(body.name || "").trim();
+    const website = String(body.website || "").trim();
+
+    const matched = name ? findCatalogSourceByName(name) : null;
+
+    if (matched) {
+      const validated = await validateKnownFeed(matched.feedUrl);
+
+      if (!validated.ok) {
+        return json(req, res, 422, {
+          ok: false,
+          error: "catalog_feed_invalid",
+          message: validated.message
+        });
+      }
+
+      return json(req, res, 200, {
+        ok: true,
+        method: "catalog",
+        topic,
+        source: {
+          name: matched.name,
+          url: validated.source.feedUrl,
+          type: "rss",
+          enabled: true,
+          homepage: matched.homepage || "",
+          confidence: 1,
+          discovered_by: "catalog",
+          validated_at: new Date().toISOString()
+        },
+        validation: {
+          feed_title: validated.source.feedTitle,
+          item_count: validated.source.itemCount
+        }
+      });
+    }
+
+    if (website) {
+      const discovered = await discoverFeedFromWebsite(website);
+
+      if (!discovered.ok) {
+        return json(req, res, 422, {
+          ok: false,
+          error: "feed_discovery_failed",
+          message: discovered.message
+        });
+      }
+
+      return json(req, res, 200, {
+        ok: true,
+        method: discovered.source.method,
+        topic,
+        source: {
+          name: name || discovered.source.feedTitle || website,
+          url: discovered.source.feedUrl,
+          type: "rss",
+          enabled: true,
+          homepage: discovered.source.homepage,
+          confidence: 0.85,
+          discovered_by: discovered.source.method,
+          validated_at: new Date().toISOString()
+        },
+        validation: {
+          feed_title: discovered.source.feedTitle,
+          item_count: discovered.source.itemCount
+        }
+      });
+    }
+
+    return json(req, res, 422, {
+      ok: false,
+      error: "not_found",
+      message: "Could not find that source by name. Try adding the website URL."
+    });
+  } catch (error) {
+    return json(req, res, 500, {
+      ok: false,
+      error: "discover_source_failed",
+      message: error.message
+    });
   }
-}
-
-async function setJson(key, value) {
-  const redis = await getRedis();
-  await redis.set(key, JSON.stringify(value));
-}
-
-export async function getSavedSources(topic = "global") {
-  if (!isRedisConfigured()) {
-    return { global: [], topic: [] };
-  }
-
-  const [globalSources, topicSources] = await Promise.all([
-    getJson(GLOBAL_SOURCES_KEY),
-    getJson(topicKey(topic))
-  ]);
-
-  return {
-    global: Array.isArray(globalSources) ? globalSources : [],
-    topic: Array.isArray(topicSources) ? topicSources : []
-  };
-}
-
-export async function getMergedSavedSources(topic = "global") {
-  const { global, topic: topicSpecific } = await getSavedSources(topic);
-  return [...global, ...topicSpecific];
-}
-
-export async function saveSource(source, topic = "global") {
-  if (!isRedisConfigured()) {
-    throw new Error("Saved sources are unavailable because Redis is not configured.");
-  }
-
-  const key = topicKey(topic);
-  const current = (await getJson(key)) || [];
-  const nextItem = sanitizeSource(source);
-
-  const next = [
-    ...current.filter((item) => item.id !== nextItem.id),
-    nextItem
-  ];
-
-  await setJson(key, next);
-  return next;
-}
-
-export async function deleteSource(id, topic = "global") {
-  if (!isRedisConfigured()) {
-    throw new Error("Saved sources are unavailable because Redis is not configured.");
-  }
-
-  const key = topicKey(topic);
-  const current = (await getJson(key)) || [];
-  const next = current.filter((item) => item.id !== id);
-
-  await setJson(key, next);
-  return next;
-}
-
-export async function updateSource(id, updates, topic = "global") {
-  if (!isRedisConfigured()) {
-    throw new Error("Saved sources are unavailable because Redis is not configured.");
-  }
-
-  const key = topicKey(topic);
-  const current = (await getJson(key)) || [];
-
-  const next = current.map((item) =>
-    item.id === id
-      ? sanitizeSource({
-          ...item,
-          ...updates,
-          id: item.id,
-          created_at: item.created_at
-        })
-      : item
-  );
-
-  await setJson(key, next);
-  return next;
 }

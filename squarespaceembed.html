@@ -745,13 +745,20 @@
             <div class="hm-msg-title">Manage Sources</div>
 
             <div class="hm-source-form">
-              <input
-                class="hm-source-input"
-                id="hmSourceName"
-                placeholder="Source name, e.g. BBC Middle East"
-              />
-              <button class="hm-btn" id="hmAddSourceBtn">Find and add source</button>
-            </div>
+  <input
+    class="hm-source-input"
+    id="hmSourceName"
+    placeholder="Source name, e.g. Reuters"
+  />
+  <input
+    class="hm-source-input"
+    id="hmSourceWebsite"
+    placeholder="Optional website URL, e.g. https://www.reuters.com/world/"
+  />
+  <button class="hm-btn" id="hmAddSourceBtn">Find source</button>
+</div>
+
+<div class="hm-note" id="hmSourceDiscoveryStatus"></div>
 
             <div class="hm-note" id="hmSourceDiscoveryStatus"></div>
 
@@ -843,8 +850,8 @@
       "https://future-scenario-predictor.vercel.app/api/sources?topic=iran";
 
     const DISCOVER_SOURCE_API_URL =
-      window.HM_DISCOVER_SOURCE_API_URL ||
-      SOURCES_API_URL.replace("/api/sources", "/api/discover-source");
+  window.HM_DISCOVER_SOURCE_API_URL ||
+  "https://future-scenario-predictor.vercel.app/api/discover-source?topic=iran";
 
     const fallbackData = {
       topic: "Iran",
@@ -948,9 +955,177 @@
     const sourcesBtn = document.getElementById("hmSourcesBtn");
 
 const sourceNameInput = document.getElementById("hmSourceName");
+const sourceWebsiteInput = document.getElementById("hmSourceWebsite");
 const addSourceBtn = document.getElementById("hmAddSourceBtn");
 const savedSourcesEl = document.getElementById("hmSavedSources");
 const sourceDiscoveryStatus = document.getElementById("hmSourceDiscoveryStatus");
+
+function hmEscapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function hmMergeSavedSources(payload) {
+  const globalSources = Array.isArray(payload?.global) ? payload.global : [];
+  const topicSources = Array.isArray(payload?.topic) ? payload.topic : [];
+  return [...globalSources, ...topicSources];
+}
+
+async function hmFetchJson(url, init = {}) {
+  const response = await fetch(url, init);
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || data.error || `Request failed (${response.status})`);
+  }
+
+  return data;
+}
+
+function hmRenderSavedSources(payload) {
+  const items = hmMergeSavedSources(payload);
+
+  if (!items.length) {
+    savedSourcesEl.innerHTML = '<div class="hm-note">No saved sources yet.</div>';
+    return;
+  }
+
+  savedSourcesEl.innerHTML = items
+    .map((item) => {
+      const confidenceText =
+        typeof item.confidence === "number" && item.confidence > 0
+          ? ` · confidence ${Math.round(item.confidence * 100)}%`
+          : "";
+
+      return `
+        <div class="hm-source-row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin:8px 0;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
+          <div style="min-width:0;">
+            <div style="font-weight:600;">${hmEscapeHtml(item.name)}</div>
+            <div style="font-size:12px;opacity:0.8;word-break:break-all;">
+              <a href="${hmEscapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${hmEscapeHtml(item.url)}</a>
+            </div>
+            <div style="font-size:12px;opacity:0.7;">
+              ${hmEscapeHtml(item.type || "rss")} · ${item.enabled === false ? "disabled" : "enabled"}${confidenceText}
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-shrink:0;">
+            <button class="hm-btn" onclick="hmToggleSourceEnabled('${hmEscapeHtml(item.id)}', ${item.enabled === false ? "true" : "false"})">
+              ${item.enabled === false ? "Enable" : "Disable"}
+            </button>
+            <button class="hm-btn" onclick="hmDeleteSource('${hmEscapeHtml(item.id)}')">Delete</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function hmLoadSavedSources() {
+  const payload = await hmFetchJson(SOURCES_API_URL);
+  hmRenderSavedSources(payload);
+}
+
+async function hmRefreshAssessment() {
+  loader.style.display = "block";
+  error.textContent = "";
+
+  try {
+    const data = await hmFetchJson(API_URL);
+    render(data);
+    status.textContent = `Updated ${relativeTime(data.updated_at || new Date().toISOString())}`;
+  } catch (err) {
+    error.textContent = err.message || "Failed to refresh assessment.";
+  } finally {
+    loader.style.display = "none";
+  }
+}
+
+async function hmDiscoverAndAddSource() {
+  const name = String(sourceNameInput.value || "").trim();
+  const website = String(sourceWebsiteInput.value || "").trim();
+
+  if (!name && !website) {
+    sourceDiscoveryStatus.textContent = "Enter a source name or a website URL.";
+    return;
+  }
+
+  addSourceBtn.disabled = true;
+  sourceDiscoveryStatus.textContent = "Finding source...";
+  error.textContent = "";
+
+  try {
+    const discovered = await hmFetchJson(DISCOVER_SOURCE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, website })
+    });
+
+    await hmFetchJson(SOURCES_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(discovered.source)
+    });
+
+    sourceNameInput.value = "";
+    sourceWebsiteInput.value = "";
+    sourceDiscoveryStatus.textContent =
+      `Added ${discovered.source.name} → ${discovered.source.url}`;
+
+    await hmLoadSavedSources();
+    await hmRefreshAssessment();
+  } catch (err) {
+    sourceDiscoveryStatus.textContent = "";
+    error.textContent = err.message || "Could not find and add source.";
+  } finally {
+    addSourceBtn.disabled = false;
+  }
+}
+
+window.hmDeleteSource = async function hmDeleteSource(id) {
+  try {
+    await hmFetchJson(SOURCES_API_URL, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    });
+
+    await hmLoadSavedSources();
+    await hmRefreshAssessment();
+  } catch (err) {
+    error.textContent = err.message || "Could not delete source.";
+  }
+};
+
+window.hmToggleSourceEnabled = async function hmToggleSourceEnabled(id, enabled) {
+  try {
+    await hmFetchJson(SOURCES_API_URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, enabled })
+    });
+
+    await hmLoadSavedSources();
+    await hmRefreshAssessment();
+  } catch (err) {
+    error.textContent = err.message || "Could not update source.";
+  }
+};
+
+addSourceBtn.onclick = hmDiscoverAndAddSource;
+
+[sourceNameInput, sourceWebsiteInput].forEach((input) => {
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      hmDiscoverAndAddSource();
+    }
+  });
+});
+
 
 const calcToggleBtn = document.getElementById("hmCalcToggleBtn");
 const calcPanel = document.getElementById("hmCalcPanel");
@@ -1106,31 +1281,7 @@ async function loadSavedSources() {
   }
 }
 
-async function addSource() {
-  const name = sourceNameInput.value.trim();
-  const url = sourceUrlInput.value.trim();
-  const type = sourceTypeInput.value;
 
-  if (!name || !url) return;
-
-  const res = await fetch(SOURCES_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, url, type, enabled: true })
-  });
-
-  if (!res.ok) {
-    console.error("Failed to save source");
-    return;
-  }
-
-  sourceNameInput.value = "";
-  sourceUrlInput.value = "";
-  sourceTypeInput.value = "rss";
-
-  await loadSavedSources();
-  await loadAssessment();
-}
 
 savedSourcesEl.addEventListener("click", async (event) => {
   const btn = event.target.closest("[data-action]");
@@ -1256,6 +1407,8 @@ function hmRenderSavedSources(payload) {
     .join("");
 }
 
+
+
 async function hmLoadSavedSources() {
   const payload = await hmFetchJson(SOURCES_API_URL);
   hmRenderSavedSources(payload);
@@ -1345,6 +1498,8 @@ window.hmToggleSourceEnabled = async function hmToggleSourceEnabled(id, enabled)
   }
 };
 
+
+
 addSourceBtn.onclick = hmDiscoverAndAddSource;
 
 sourceNameInput.addEventListener("keydown", (event) => {
@@ -1364,6 +1519,7 @@ hmRefreshAssessment().catch((err) => {
 
 addSourceBtn.addEventListener("click", addSource);
 loadSavedSources();
+
 
     loadAssessment();
   </script>

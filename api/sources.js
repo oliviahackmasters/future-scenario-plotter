@@ -5,11 +5,27 @@ import {
   updateSource
 } from "../lib/source-store.js";
 
-function json(res, status, body) {
-  res.status(status).setHeader("Content-Type", "application/json");
-  res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
+function getAllowedOrigin(req) {
+  const requestOrigin = req.headers.origin || "";
+  const configured = String(process.env.ALLOWED_ORIGIN || "").trim();
+
+  if (!configured) return "*";
+  if (configured === "*") return "*";
+  if (requestOrigin && requestOrigin === configured) return configured;
+
+  return configured;
+}
+
+function setCors(req, res) {
+  const origin = getAllowedOrigin(req);
+  res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+function json(req, res, status, body) {
+  setCors(req, res);
+  res.status(status).setHeader("Content-Type", "application/json");
   res.send(JSON.stringify(body));
 }
 
@@ -26,20 +42,20 @@ export default async function handler(req, res) {
   const topic = req.query.topic || "iran";
 
   if (req.method === "OPTIONS") {
-    return json(res, 200, { ok: true });
+    return json(req, res, 200, { ok: true });
   }
 
   try {
     if (req.method === "GET") {
       const sources = await getSavedSources(topic);
-      return json(res, 200, sources);
+      return json(req, res, 200, sources);
     }
 
     if (req.method === "POST") {
       const body = parseBody(req);
 
       if (!body.name || !body.url) {
-        return json(res, 400, {
+        return json(req, res, 400, {
           error: "invalid_source",
           message: "name and url are required"
         });
@@ -59,14 +75,14 @@ export default async function handler(req, res) {
         topic
       );
 
-      return json(res, 200, { ok: true, sources: next });
+      return json(req, res, 200, { ok: true, sources: next });
     }
 
     if (req.method === "PATCH") {
       const body = parseBody(req);
 
       if (!body.id) {
-        return json(res, 400, { error: "missing_id" });
+        return json(req, res, 400, { error: "missing_id" });
       }
 
       const next = await updateSource(
@@ -84,23 +100,23 @@ export default async function handler(req, res) {
         topic
       );
 
-      return json(res, 200, { ok: true, sources: next });
+      return json(req, res, 200, { ok: true, sources: next });
     }
 
     if (req.method === "DELETE") {
       const body = parseBody(req);
 
       if (!body.id) {
-        return json(res, 400, { error: "missing_id" });
+        return json(req, res, 400, { error: "missing_id" });
       }
 
       const next = await deleteSource(body.id, topic);
-      return json(res, 200, { ok: true, sources: next });
+      return json(req, res, 200, { ok: true, sources: next });
     }
 
-    return json(res, 405, { error: "method_not_allowed" });
+    return json(req, res, 405, { error: "method_not_allowed" });
   } catch (error) {
-    return json(res, 500, {
+    return json(req, res, 500, {
       error: "sources_api_failed",
       message: error.message
     });
