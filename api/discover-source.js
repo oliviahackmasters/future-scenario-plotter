@@ -55,36 +55,62 @@ export default async function handler(req, res) {
     const matched = name ? findCatalogSourceByName(name) : null;
 
     if (matched) {
-      const validated = await validateKnownFeed(matched.feedUrl);
+  const validated = await validateKnownFeed(matched.feedUrl);
 
-      if (!validated.ok) {
-        return json(req, res, 422, {
-          ok: false,
-          error: "catalog_feed_invalid",
-          message: validated.message
-        });
+  if (validated.ok) {
+    return json(req, res, 200, {
+      ok: true,
+      method: "catalog",
+      topic,
+      source: {
+        name: matched.name,
+        url: validated.source.feedUrl,
+        type: "rss",
+        enabled: true,
+        homepage: matched.homepage || "",
+        confidence: 1,
+        discovered_by: "catalog",
+        validated_at: new Date().toISOString()
+      },
+      validation: {
+        feed_title: validated.source.feedTitle,
+        item_count: validated.source.itemCount
       }
+    });
+  }
 
+  if (website) {
+    const discovered = await discoverFeedFromWebsite(website);
+
+    if (discovered.ok) {
       return json(req, res, 200, {
         ok: true,
-        method: "catalog",
+        method: discovered.source.method,
         topic,
         source: {
           name: matched.name,
-          url: validated.source.feedUrl,
+          url: discovered.source.feedUrl,
           type: "rss",
           enabled: true,
-          homepage: matched.homepage || "",
-          confidence: 1,
-          discovered_by: "catalog",
+          homepage: discovered.source.homepage,
+          confidence: 0.85,
+          discovered_by: discovered.source.method,
           validated_at: new Date().toISOString()
         },
         validation: {
-          feed_title: validated.source.feedTitle,
-          item_count: validated.source.itemCount
+          feed_title: discovered.source.feedTitle,
+          item_count: discovered.source.itemCount
         }
       });
     }
+  }
+
+  return json(req, res, 422, {
+    ok: false,
+    error: "catalog_feed_invalid",
+    message: "Known source matched, but the stored feed is no longer valid. Try adding the website URL."
+  });
+}
 
     if (website) {
       const discovered = await discoverFeedFromWebsite(website);
