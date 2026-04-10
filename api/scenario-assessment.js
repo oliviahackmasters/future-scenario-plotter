@@ -2,6 +2,7 @@ import Parser from "rss-parser";
 import OpenAI from "openai";
 import url from "url";
 import { getMergedSavedSources } from "../lib/source-store.js";
+import { discoverFeedFromWebsite } from "../lib/feed-discovery.js";
 
 const parser = new Parser();
 
@@ -311,13 +312,13 @@ function scoreAndSort(items, savedSourceNames = []) {
 }
 
 async function fetchRssItems(source, keywordFilter) {
-  try {
-    const xml = await fetchText(source.url, {}, RSS_FETCH_TIMEOUT_MS);
+  async function fetchFromUrl(urlToFetch, label) {
+    const xml = await fetchText(urlToFetch, {}, RSS_FETCH_TIMEOUT_MS);
     const feed = await parser.parseString(xml);
     const items = Array.isArray(feed.items) ? feed.items : [];
 
     console.log(
-      `RAW FEED ITEMS FOR ${source.name}:`,
+      `RAW FEED ITEMS FOR ${source.name} (${label}):`,
       items.slice(0, 3).map((item) => ({
         title: item.title,
         link: item.link,
@@ -335,8 +336,27 @@ async function fetchRssItems(source, keywordFilter) {
       isoDate: item.isoDate || item.pubDate || null,
       keywords: keywordFilter
     }));
+  }
+
+  try {
+    return await fetchFromUrl(source.url, "direct");
   } catch (error) {
-    console.error(`Failed to fetch ${source.name}:`, error.message);
+    console.error(`Failed to fetch ${source.name} from direct URL:`, error.message);
+
+    if (source.homepage) {
+      try {
+        const discovery = await discoverFeedFromWebsite(source.homepage);
+        if (discovery.ok && discovery.source.feedUrl && discovery.source.feedUrl !== source.url) {
+          console.log(`Discovered alternate feed for ${source.name}: ${discovery.source.feedUrl}`);
+          return await fetchFromUrl(discovery.source.feedUrl, "discovered");
+        }
+
+        console.warn(`Could not discover alternate feed for ${source.name}: ${discovery.message}`);
+      } catch (fallbackError) {
+        console.error(`Feed discovery failed for ${source.name}:`, fallbackError.message);
+      }
+    }
+
     return [];
   }
 }

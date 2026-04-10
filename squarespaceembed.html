@@ -559,6 +559,13 @@
   background:rgba(255,255,255,0.01);
 }
 
+#hmScenarioPlotter .hm-source-manager.collapsed .hm-source-form,
+#hmScenarioPlotter .hm-source-manager.collapsed .hm-note,
+#hmScenarioPlotter .hm-source-manager.collapsed .hm-saved-sources,
+#hmScenarioPlotter .hm-source-manager.collapsed .hm-built-in-sources {
+  display:none !important;
+}
+
 #hmScenarioPlotter .hm-source-form{
   display:grid;
   grid-template-columns:1fr 1.4fr 120px auto;
@@ -580,7 +587,84 @@
 
 #hmScenarioPlotter .hm-saved-sources{
   display:grid;
+  gap:6px;
+  margin-top:10px;
+}
+
+#hmScenarioPlotter .hm-source-row{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  justify-content:space-between;
+  margin:4px 0;
+  padding:8px 10px;
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:8px;
+  background:rgba(255,255,255,0.01);
+}
+
+#hmScenarioPlotter .hm-source-row > div:first-child{
+  min-width:0;
+}
+
+#hmScenarioPlotter .hm-source-row .hm-source-meta{
+  font-size:12px;
+  line-height:1.4;
+}
+
+#hmScenarioPlotter .hm-source-row .hm-source-meta .hm-source-name{
+  font-weight:600;
+  margin-bottom:2px;
+}
+
+#hmScenarioPlotter .hm-source-row .hm-source-url{
+  font-size:11px;
+  opacity:0.8;
+  word-break:break-all;
+  margin-bottom:4px;
+}
+
+#hmScenarioPlotter .hm-source-row .hm-source-status{
+  font-size:11px;
+  opacity:0.7;
+}
+
+#hmScenarioPlotter .hm-source-row .hm-source-actions{
+  display:flex;
   gap:8px;
+  flex-shrink:0;
+}
+
+#hmScenarioPlotter .hm-built-in-sources{
+  margin-top:16px;
+}
+
+#hmScenarioPlotter .hm-builtin-controls{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-bottom:12px;
+}
+
+#hmScenarioPlotter .hm-builtin-list{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap:8px;
+}
+
+#hmScenarioPlotter .hm-built-in-item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  border:1px solid rgba(209,128,87,0.35);
+  border-radius:8px;
+  background:rgba(255,255,255,0.02);
+}
+
+#hmScenarioPlotter .hm-built-in-item a{
+  color:rgba(255,255,255,0.85);
+  text-decoration:underline;
 }
 
 #hmScenarioPlotter .hm-saved-source{
@@ -768,9 +852,12 @@
        <section class="hm-card">
       <button class="hm-btn" id="hmRefreshBtn">Refresh analysis</button>
   <div class="hm-source-manager">
-            <div class="hm-msg-title">Manage Sources</div>
+    <div class="hm-source-manager-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div class="hm-msg-title">Manage Sources</div>
+      <button class="hm-btn hm-source-toggle-btn" id="hmSourceManagerToggle" type="button">Hide sources</button>
+    </div>
 
-            <div class="hm-source-form">
+    <div class="hm-source-form">
   <input
     class="hm-source-input"
     id="hmSourceName"
@@ -986,6 +1073,8 @@ const addSourceBtn = document.getElementById("hmAddSourceBtn");
 const savedSourcesEl = document.getElementById("hmSavedSources");
 const builtInSourcesEl = document.getElementById("hmBuiltInSources");
 const sourceDiscoveryStatus = document.getElementById("hmSourceDiscoveryStatus");
+const sourceManagerEl = document.querySelector(".hm-source-manager");
+const sourceManagerToggleBtn = document.getElementById("hmSourceManagerToggle");
 
 function hmEscapeHtml(value) {
   return String(value || "")
@@ -1029,17 +1118,17 @@ function hmRenderSavedSources(payload) {
           : "";
 
       return `
-        <div class="hm-source-row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin:8px 0;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
-          <div style="min-width:0;">
-            <div style="font-weight:600;">${hmEscapeHtml(item.name)}</div>
-            <div style="font-size:12px;opacity:0.8;word-break:break-all;">
+        <div class="hm-source-row">
+          <div class="hm-source-meta">
+            <div class="hm-source-name">${hmEscapeHtml(item.name)}</div>
+            <div class="hm-source-url">
               <a href="${hmEscapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${hmEscapeHtml(item.url)}</a>
             </div>
-            <div style="font-size:12px;opacity:0.7;">
+            <div class="hm-source-status">
               ${hmEscapeHtml(item.type || "rss")} · ${item.enabled === false ? "disabled" : "enabled"}${confidenceText}
             </div>
           </div>
-          <div style="display:flex;gap:8px;flex-shrink:0;">
+          <div class="hm-source-actions">
             <button class="hm-btn" onclick="hmToggleSourceEnabled('${hmEscapeHtml(item.id)}', ${item.enabled === false ? "true" : "false"})">
               ${item.enabled === false ? "Enable" : "Disable"}
             </button>
@@ -1055,6 +1144,16 @@ async function hmLoadSavedSources() {
   const payload = await hmFetchJson(SOURCES_API_URL);
   hmRenderSavedSources(payload);
   hmRenderBuiltInSources(payload);
+}
+
+function hmToggleSourceManager() {
+  if (!sourceManagerEl || !sourceManagerToggleBtn) return;
+  const isCollapsed = sourceManagerEl.classList.toggle("collapsed");
+  sourceManagerToggleBtn.textContent = isCollapsed ? "Show sources" : "Hide sources";
+}
+
+if (sourceManagerToggleBtn) {
+  sourceManagerToggleBtn.addEventListener("click", hmToggleSourceManager);
 }
 
 function hmRenderBuiltInSources(payload) {
