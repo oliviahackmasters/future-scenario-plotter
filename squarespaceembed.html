@@ -760,7 +760,6 @@
 
 <div class="hm-note" id="hmSourceDiscoveryStatus"></div>
 
-            <div class="hm-note" id="hmSourceDiscoveryStatus"></div>
 
             <div class="hm-saved-sources" id="hmSavedSources"></div>
 </div>
@@ -1232,24 +1231,7 @@ const calcPanel = document.getElementById("hmCalcPanel");
   calcToggleBtn.textContent = hidden ? "Hide calculation" : "How was this calculated?";
 });
 
- function renderSavedSources(items) {
-  savedSourcesEl.innerHTML = (items || []).map((item) => `
-    <div class="hm-saved-source" data-enabled="${item.enabled === false ? "false" : "true"}">
-      <div class="hm-saved-source-meta">
-        <div class="hm-saved-source-name">${item.name} ${item.enabled === false ? "(disabled)" : ""}</div>
-        <div class="hm-saved-source-url">${item.url}</div>
-      </div>
-
-      <button class="hm-source-mini-btn" data-action="toggle" data-id="${item.id}">
-        ${item.enabled === false ? "Enable" : "Disable"}
-      </button>
-
-      <button class="hm-source-mini-btn" data-action="delete" data-id="${item.id}">
-        Delete
-      </button>
-    </div>
-  `).join("");
-}
+ 
 
 function renderPlotHeatmap(scenarios) {
   const cells = document.querySelectorAll("#hmScenarioPlotter .hm-plot-cell[data-scenario-name]");
@@ -1343,171 +1325,6 @@ function renderCalculation(calculation) {
   `).join("");
 }
 
-function hmEscapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function hmMergeSavedSources(payload) {
-  const globalSources = Array.isArray(payload?.global) ? payload.global : [];
-  const topicSources = Array.isArray(payload?.topic) ? payload.topic : [];
-  return [...globalSources, ...topicSources];
-}
-
-async function hmFetchJson(url, init = {}) {
-  const response = await fetch(url, init);
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.message || data.error || `Request failed (${response.status})`);
-  }
-
-  return data;
-}
-
-function hmRenderSavedSources(payload) {
-  const items = hmMergeSavedSources(payload);
-
-  if (!items.length) {
-    savedSourcesEl.innerHTML = '<div class="hm-note">No saved sources yet.</div>';
-    return;
-  }
-
-  savedSourcesEl.innerHTML = items
-    .map((item) => {
-      const confidenceText =
-        typeof item.confidence === "number" && item.confidence > 0
-          ? ` · confidence ${Math.round(item.confidence * 100)}%`
-          : "";
-
-      return `
-        <div class="hm-source-row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;margin:8px 0;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
-          <div style="min-width:0;">
-            <div style="font-weight:600;">${hmEscapeHtml(item.name)}</div>
-            <div style="font-size:12px;opacity:0.8;word-break:break-all;">
-              <a href="${hmEscapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${hmEscapeHtml(item.url)}</a>
-            </div>
-            <div style="font-size:12px;opacity:0.7;">
-              ${hmEscapeHtml(item.type || "rss")} · ${item.enabled === false ? "disabled" : "enabled"}${confidenceText}
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;flex-shrink:0;">
-            <button class="hm-btn" onclick="hmToggleSourceEnabled('${hmEscapeHtml(item.id)}', ${item.enabled === false ? "true" : "false"})">
-              ${item.enabled === false ? "Enable" : "Disable"}
-            </button>
-            <button class="hm-btn" onclick="hmDeleteSource('${hmEscapeHtml(item.id)}')">Delete</button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
-}
-
-
-
-async function hmLoadSavedSources() {
-  const payload = await hmFetchJson(SOURCES_API_URL);
-  hmRenderSavedSources(payload);
-}
-
-async function hmRefreshAssessment() {
-  loader.style.display = "block";
-  error.textContent = "";
-
-  try {
-    const data = await hmFetchJson(API_URL);
-    render(data);
-    status.textContent = `Updated ${relativeTime(data.updated_at || new Date().toISOString())}`;
-  } catch (err) {
-    error.textContent = err.message || "Failed to refresh assessment.";
-  } finally {
-    loader.style.display = "none";
-  }
-}
-
-async function hmDiscoverAndAddSource() {
-  const name = String(sourceNameInput.value || "").trim();
-
-  if (!name) {
-    sourceDiscoveryStatus.textContent = "Enter a source name first.";
-    return;
-  }
-
-  addSourceBtn.disabled = true;
-  sourceDiscoveryStatus.textContent = `Finding a feed for "${name}"...`;
-  error.textContent = "";
-
-  try {
-    const discovered = await hmFetchJson(DISCOVER_SOURCE_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name })
-    });
-
-    await hmFetchJson(SOURCES_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(discovered.source)
-    });
-
-    sourceNameInput.value = "";
-    sourceDiscoveryStatus.textContent =
-      `Added ${discovered.source.name} → ${discovered.source.url}`;
-
-    await hmLoadSavedSources();
-    await hmRefreshAssessment();
-  } catch (err) {
-    sourceDiscoveryStatus.textContent = "";
-    error.textContent = err.message || "Could not discover and add source.";
-  } finally {
-    addSourceBtn.disabled = false;
-  }
-}
-
-window.hmDeleteSource = async function hmDeleteSource(id) {
-  try {
-    await hmFetchJson(SOURCES_API_URL, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id })
-    });
-
-    await hmLoadSavedSources();
-    await hmRefreshAssessment();
-  } catch (err) {
-    error.textContent = err.message || "Could not delete source.";
-  }
-};
-
-window.hmToggleSourceEnabled = async function hmToggleSourceEnabled(id, enabled) {
-  try {
-    await hmFetchJson(SOURCES_API_URL, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, enabled })
-    });
-
-    await hmLoadSavedSources();
-    await hmRefreshAssessment();
-  } catch (err) {
-    error.textContent = err.message || "Could not update source.";
-  }
-};
-
-
-
-addSourceBtn.onclick = hmDiscoverAndAddSource;
-
-sourceNameInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    hmDiscoverAndAddSource();
-  }
-});
 
 hmLoadSavedSources().catch((err) => {
   error.textContent = err.message || "Failed to load saved sources.";
@@ -1517,8 +1334,6 @@ hmRefreshAssessment().catch((err) => {
   error.textContent = err.message || "Failed to load assessment.";
 });
 
-addSourceBtn.addEventListener("click", addSource);
-loadSavedSources();
 
 
     loadAssessment();

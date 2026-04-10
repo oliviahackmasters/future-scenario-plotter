@@ -5,6 +5,13 @@ import { getMergedSavedSources } from "../lib/source-store.js";
 const parser = new Parser();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+const RSS_FETCH_TIMEOUT_MS = 8000;
+const JSON_FETCH_TIMEOUT_MS = 8000;
+const OPENAI_TIMEOUT_FALLBACK_MS = 20000;
+const MAX_ITEMS_PER_FEED = 6;
+const MAX_ARTICLES_FOR_MODEL = 4;
+const MAX_FILTERED_ITEMS = 6;
+const MIN_MATCHES_REQUIRED = 2;
 
 const TOPICS = {
   iran: {
@@ -13,7 +20,8 @@ const TOPICS = {
       {
         name: "Chaos + Collapse",
         description: "Multi-state regional war and a dysfunctional government in Iran.",
-        gccReality: "Extreme security volatility, refugee flows, cross-border instability, oil system shock, and global recession risk.",
+        gccReality:
+          "Extreme security volatility, refugee flows, cross-border instability, oil system shock, and global recession risk.",
         scenarioSignals: [
           "loss of central command in Iran",
           "multiple armed factions emerge",
@@ -22,8 +30,10 @@ const TOPICS = {
       },
       {
         name: "Shattered Diplomacy",
-        description: "Security threat reduces in the short term, but long-term uncertainty rises through ungoverned spaces in Iran and militia proliferation.",
-        gccReality: "Security threat reduces short term but long-term uncertainty rises through ungoverned spaces in Iran and militias.",
+        description:
+          "Security threat reduces in the short term, but long-term uncertainty rises through ungoverned spaces in Iran and militia proliferation.",
+        gccReality:
+          "Security threat reduces short term but long-term uncertainty rises through ungoverned spaces in Iran and militias.",
         scenarioSignals: [
           "leadership fractures",
           "internal uprising or regime weakening",
@@ -32,8 +42,10 @@ const TOPICS = {
       },
       {
         name: "Burning Strait",
-        description: "The Gulf becomes an active war theatre, with severe energy-export disruption and mounting internal stability pressure.",
-        gccReality: "Active war theatre, energy exports severely disrupted, civil defence activation, and internal stability pressures.",
+        description:
+          "The Gulf becomes an active war theatre, with severe energy-export disruption and mounting internal stability pressure.",
+        gccReality:
+          "Active war theatre, energy exports severely disrupted, civil defence activation, and internal stability pressures.",
         scenarioSignals: [
           "long-term Hormuz closure",
           "direct GCC military retaliation",
@@ -42,8 +54,10 @@ const TOPICS = {
       },
       {
         name: "Cold Containment",
-        description: "Managed escalation with constant security pressure, rising defence costs, and disrupted but still functioning oil flows.",
-        gccReality: "Constant security pressure, rising defence costs, economic resilience but slow growth.",
+        description:
+          "Managed escalation with constant security pressure, rising defence costs, and disrupted but still functioning oil flows.",
+        gccReality:
+          "Constant security pressure, rising defence costs, economic resilience but slow growth.",
         scenarioSignals: [
           "repeated ceasefire attempts",
           "limited symbolic retaliation",
@@ -68,14 +82,11 @@ const TOPICS = {
       "prediction market odds"
     ],
     sources: [
-        // { name: "BBC World", url: "http://feeds.bbci.co.uk/news/world/rss.xml" },
-        { name: "BBC Middle East", url: "http://feeds.bbci.co.uk/news/world/middle_east/rss.xml" },
-        // { name: "Reuters World", url: "https://www.reutersagency.com/feed/?best-topics=world&post_type=best" },
-        // { name: "FT Markets", url: "https://www.ft.com/markets?format=rss" },
-        { name: "FT Oil", url: "https://www.ft.com/oil?format=rss" },
-        { name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
-        { name: "FT Energy", url: "https://www.ft.com/energy?format=rss" },
-        { name: "Guardian World", url: "https://www.theguardian.com/world/rss" }
+      { name: "BBC Middle East", url: "http://feeds.bbci.co.uk/news/world/middle_east/rss.xml" },
+      { name: "FT Oil", url: "https://www.ft.com/oil?format=rss" },
+      { name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
+      { name: "FT Energy", url: "https://www.ft.com/energy?format=rss" },
+      { name: "Guardian World", url: "https://www.theguardian.com/world/rss" }
     ],
     keywordFilter: [
       "iran",
@@ -117,12 +128,7 @@ const TOPICS = {
       "tankers",
       "kharg"
     ],
-    polymarketSearchTerms: [
-      "iran",
-      "hormuz",
-      "middle east war",
-      "israel iran"
-    ]
+    polymarketSearchTerms: ["iran", "hormuz", "middle east war", "israel iran"]
   }
 };
 
@@ -142,47 +148,152 @@ function json(res, status, body) {
   res.send(JSON.stringify(body));
 }
 
+function withTimeout(ms) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeoutId)
+  };
+}
+
+async function fetchText(url, init = {}, timeoutMs = RSS_FETCH_TIMEOUT_MS) {
+  const { signal, clear } = withTimeout(timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal,
+      headers: {
+        "User-Agent": "future-scenario-predictor/1.0",
+        Accept: "application/rss+xml, application/xml, text/xml, application/atom+xml, text/plain, */*",
+        ...(init.headers || {})
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error(`Fetch failed ${res.status} for ${url}`);
+    }
+
+    return await res.text();
+  } finally {
+    clear();
+  }
+}
+
+async function fetchJson(url, init = {}, timeoutMs = JSON_FETCH_TIMEOUT_MS) {
+  const { signal, clear } = withTimeout(timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal,
+      headers: {
+        "User-Agent": "future-scenario-predictor/1.0",
+        Accept: "application/json",
+        ...(init.headers || {})
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error(`Fetch failed ${res.status} for ${url}`);
+    }
+
+    return await res.json();
+  } finally {
+    clear();
+  }
+}
+
+function dedupeBy(items, getKey) {
+  return Array.from(new Map(items.map((item) => [getKey(item), item])).values());
+}
+
+function isStrongIranMatch(item) {
+  const title = String(item.title || "").toLowerCase();
+  const snippet = String(item.contentSnippet || "").toLowerCase();
+  const haystack = `${title} ${snippet}`;
+
+  const directIranTerms = [
+    "iran",
+    "tehran",
+    "iranian",
+    "hormuz",
+    "strait of hormuz",
+    "persian gulf",
+    "kharg"
+  ];
+
+  const regionalContextTerms = [
+    "israel",
+    "lebanon",
+    "iraq",
+    "gcc",
+    "gulf",
+    "oil",
+    "energy",
+    "shipping",
+    "tankers",
+    "missile",
+    "drone",
+    "ceasefire",
+    "retaliation",
+    "militia",
+    "strike",
+    "attack"
+  ];
+
+  const directHits = directIranTerms.filter((term) => haystack.includes(term)).length;
+  const contextHits = regionalContextTerms.filter((term) => haystack.includes(term)).length;
+
+  if (directHits >= 1) return true;
+  if (title.includes("hormuz")) return true;
+  if (title.includes("iran") && contextHits >= 1) return true;
+
+  return false;
+}
+
 function scoreAndSort(items, savedSourceNames = []) {
   return items
     .map((item) => {
-      const haystack = `${item.title} ${item.contentSnippet} ${item.content}`.toLowerCase();
+      const haystack = `${item.title} ${item.contentSnippet}`.toLowerCase();
+
       let matches = 0;
       for (const keyword of item.keywords || []) {
         if (haystack.includes(keyword)) matches += 1;
       }
 
       const savedBoost = savedSourceNames.includes(item.source) ? 0.75 : 0;
+      const titleBoost = String(item.title || "").toLowerCase().includes("iran") ? 1 : 0;
+      const score = matches + savedBoost + titleBoost;
 
-      return { ...item, _matches: matches, _score: matches + savedBoost };
+      return { ...item, _matches: matches, _score: score };
     })
-    .filter((item) => item._matches > 0)
+    .filter((item) => item._matches >= MIN_MATCHES_REQUIRED)
+    .filter(isStrongIranMatch)
     .sort((a, b) => b._score - a._score || (b.isoDate || "").localeCompare(a.isoDate || ""));
-}
-
-async function fetchJson(url, init = {}) {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    throw new Error(`Fetch failed ${res.status} for ${url}`);
-  }
-  return res.json();
 }
 
 async function fetchRssItems(source, keywordFilter) {
   try {
-    const feed = await parser.parseURL(source.url);
+    const xml = await fetchText(source.url, {}, RSS_FETCH_TIMEOUT_MS);
+    const feed = await parser.parseString(xml);
     const items = Array.isArray(feed.items) ? feed.items : [];
-    console.log(`RAW FEED ITEMS FOR ${source.name}:`, items.slice(0, 3).map((item) => ({
-      title: item.title,
-      link: item.link,
-      isoDate: item.isoDate || item.pubDate,
-      snippet: (item.contentSnippet || item.summary || item.content || "").slice(0, 120)
-    })));
-    return items.slice(0, 6).map((item) => ({
+
+    console.log(
+      `RAW FEED ITEMS FOR ${source.name}:`,
+      items.slice(0, 3).map((item) => ({
+        title: item.title,
+        link: item.link,
+        isoDate: item.isoDate || item.pubDate,
+        snippet: (item.contentSnippet || item.summary || item.content || "").slice(0, 120)
+      }))
+    );
+
+    return items.slice(0, MAX_ITEMS_PER_FEED).map((item) => ({
       source: source.name,
       url: item.link || source.url,
       title: normalizeWhitespace(item.title),
-      contentSnippet: normalizeWhitespace(item.contentSnippet || item.summary || ""),
-      content: normalizeWhitespace(item.content || item["content:encoded"] || item.summary || ""),
+      contentSnippet: normalizeWhitespace(item.contentSnippet || item.summary || "").slice(0, 300),
+      content: "",
       isoDate: item.isoDate || item.pubDate || null,
       keywords: keywordFilter
     }));
@@ -190,6 +301,31 @@ async function fetchRssItems(source, keywordFilter) {
     console.error(`Failed to fetch ${source.name}:`, error.message);
     return [];
   }
+}
+
+function ensureSavedSourcePresence(scoredItems, savedSourceNames = [], maxTotal = MAX_FILTERED_ITEMS) {
+  const result = [];
+  const usedUrls = new Set();
+
+  for (const sourceName of savedSourceNames) {
+    const match = scoredItems.find(
+      (item) => item.source === sourceName && !usedUrls.has(item.url)
+    );
+    if (match) {
+      result.push(match);
+      usedUrls.add(match.url);
+    }
+  }
+
+  for (const item of scoredItems) {
+    if (result.length >= maxTotal) break;
+    if (!usedUrls.has(item.url)) {
+      result.push(item);
+      usedUrls.add(item.url);
+    }
+  }
+
+  return result.slice(0, maxTotal);
 }
 
 async function collectTopicCoverage(topicConfig, savedSources = []) {
@@ -219,55 +355,69 @@ async function collectTopicCoverage(topicConfig, savedSources = []) {
   );
 
   console.log("DEFAULT SOURCES:", defaultSources.map((s) => s.name));
-  console.log("SAVED SOURCES:", extraSources.map((s) => ({
-    name: s.name,
-    url: s.url,
-    type: s.type,
-    enabled: s.enabled
-  })));
-  console.log("RSS SOURCES USED:", rssSources.map((s) => ({
-    name: s.name,
-    url: s.url,
-    type: s.type
-  })));
+  console.log(
+    "SAVED SOURCES:",
+    extraSources.map((s) => ({
+      name: s.name,
+      url: s.url,
+      type: s.type,
+      enabled: s.enabled
+    }))
+  );
+  console.log(
+    "RSS SOURCES USED:",
+    rssSources.map((s) => ({
+      name: s.name,
+      url: s.url,
+      type: s.type
+    }))
+  );
 
   const itemGroups = await Promise.all(
     rssSources.map((source) => fetchRssItems(source, topicConfig.keywordFilter))
   );
 
   const flattened = itemGroups.flat();
+  const dedupedByUrl = dedupeBy(flattened, (item) => item.url);
 
   console.log(
     "FETCHED ARTICLE COUNTS BY SOURCE:",
-    flattened.reduce((acc, item) => {
+    dedupedByUrl.reduce((acc, item) => {
       acc[item.source] = (acc[item.source] || 0) + 1;
       return acc;
     }, {})
   );
 
   const savedSourceNames = extraSources.map((s) => s.name);
-
-  const scored = scoreAndSort(flattened, savedSourceNames);
+  const scored = scoreAndSort(dedupedByUrl, savedSourceNames);
 
   console.log(
     "TOP 20 SCORED SOURCES:",
     scored.slice(0, 20).map((item) => ({
       source: item.source,
       title: item.title,
-      matches: item._matches
+      matches: item._matches,
+      score: item._score
     }))
   );
 
-  const filtered = ensureSavedSourcePresence(scored, savedSourceNames, 8);
+  const filtered = ensureSavedSourcePresence(scored, savedSourceNames, MAX_FILTERED_ITEMS);
+  const shortlisted = filtered.slice(0, MAX_ARTICLES_FOR_MODEL);
 
-  console.log("FINAL FILTERED SOURCES:", filtered.map((item) => item.source));
+  console.log(
+    "FINAL FILTERED SOURCES:",
+    shortlisted.map((item) => ({
+      source: item.source,
+      title: item.title
+    }))
+  );
 
-  return filtered.map((item) => ({
+  return shortlisted.map((item) => ({
     source: item.source,
     url: item.url,
     title: item.title,
     published_at: item.isoDate,
-    snippet: String(item.contentSnippet || item.content || "").slice(0, 300)
+    snippet: String(item.contentSnippet || "").slice(0, 220)
   }));
 }
 
@@ -282,14 +432,15 @@ async function fetchOilSignal() {
         name: "oil prices",
         reading: "Oil API key not configured.",
         direction: "neutral",
-        confidence: "Low"
+        confidence: "Low",
+        sources: []
       }
     };
   }
 
   try {
     const url = `https://www.alphavantage.co/query?function=BRENT&interval=monthly&apikey=${encodeURIComponent(apiKey)}`;
-    const data = await fetchJson(url);
+    const data = await fetchJson(url, {}, JSON_FETCH_TIMEOUT_MS);
     const series = Array.isArray(data.data) ? data.data : [];
     const latest = series[0] ? Number(series[0].value) : null;
     const previous = series[1] ? Number(series[1].value) : null;
@@ -324,7 +475,8 @@ async function fetchOilSignal() {
         name: "oil prices",
         reading,
         direction,
-        confidence
+        confidence,
+        sources: []
       }
     };
   } catch (error) {
@@ -337,7 +489,8 @@ async function fetchOilSignal() {
         name: "oil prices",
         reading: `Oil feed unavailable: ${error.message}`,
         direction: "neutral",
-        confidence: "Low"
+        confidence: "Low",
+        sources: []
       }
     };
   }
@@ -396,16 +549,19 @@ function scorePolymarketScenario(question, yesPrice) {
 
 async function fetchPolymarketSignal(topicConfig) {
   try {
-    const markets = await fetchJson("https://gamma-api.polymarket.com/markets");
+    const markets = await fetchJson("https://gamma-api.polymarket.com/markets", {}, JSON_FETCH_TIMEOUT_MS);
     const active = Array.isArray(markets) ? markets : [];
 
     const filtered = active
       .filter((m) => m.active && !m.closed)
       .filter((m) => {
-        const text = `${m.question || ""} ${m.description || ""} ${(m.events || []).map(e => e.title || "").join(" ")}`.toLowerCase();
+        const text = `${m.question || ""} ${m.description || ""} ${(m.events || [])
+          .map((e) => e.title || "")
+          .join(" ")}`.toLowerCase();
+
         return topicConfig.polymarketSearchTerms.some((term) => text.includes(term));
       })
-      .slice(0, 40);
+      .slice(0, 20);
 
     const weights = new Map([
       ["Chaos + Collapse", 0],
@@ -417,17 +573,17 @@ async function fetchPolymarketSignal(topicConfig) {
     const matchedMarkets = [];
 
     for (const market of filtered) {
-    let outcomePrices = [];
+      let outcomePrices = [];
 
-    if (Array.isArray(market.outcomePrices)) {
-    outcomePrices = market.outcomePrices;
-    } else if (typeof market.outcomePrices === "string") {
-    try {
-        outcomePrices = JSON.parse(market.outcomePrices || "[]");
-    } catch {
-        outcomePrices = [];
-    }
-    }
+      if (Array.isArray(market.outcomePrices)) {
+        outcomePrices = market.outcomePrices;
+      } else if (typeof market.outcomePrices === "string") {
+        try {
+          outcomePrices = JSON.parse(market.outcomePrices || "[]");
+        } catch {
+          outcomePrices = [];
+        }
+      }
 
       const yesPrice = Number(outcomePrices[0] || 0);
       const mapped = scorePolymarketScenario(market.question, yesPrice);
@@ -456,7 +612,8 @@ async function fetchPolymarketSignal(topicConfig) {
         name: "prediction market odds",
         reading,
         direction: matchedMarkets.length ? "escalatory" : "neutral",
-        confidence: matchedMarkets.length >= 3 ? "Medium" : "Low"
+        confidence: matchedMarkets.length >= 3 ? "Medium" : "Low",
+        sources: []
       }
     };
   } catch (error) {
@@ -470,12 +627,12 @@ async function fetchPolymarketSignal(topicConfig) {
         name: "prediction market odds",
         reading: `Prediction market feed unavailable: ${error.message}`,
         direction: "neutral",
-        confidence: "Low"
+        confidence: "Low",
+        sources: []
       }
     };
   }
 }
-
 
 function buildPrompt(topicConfig, articles, externalSignals) {
   return [
@@ -514,8 +671,8 @@ function buildPrompt(topicConfig, articles, externalSignals) {
     "14. Pay close attention to whether oil flows are disrupted versus fully halted.",
     "15. Distinguish between regime weakening, leadership fractures, and full loss of central command.",
     "16. Distinguish between limited symbolic retaliation and direct GCC military retaliation.",
-    "Output requirements:",
     "",
+    "Output requirements:",
     "- Return valid JSON matching the required schema.",
     "- Every signal must include: name, reading, direction, confidence, and sources.",
     "- sources must be an array of objects with title, url, and source.",
@@ -556,87 +713,85 @@ const responseSchema = {
       }
     },
     signals: {
-        type: "array",
-        items: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-            name: { type: "string" },
-            reading: { type: "string" },
-            direction: {
-                type: "string",
-                enum: ["escalatory", "neutral", "de-escalatory"]
-            },
-            confidence: {
-                type: "string",
-                enum: ["Low", "Medium", "High"]
-            },
-            sources: {
-                type: "array",
-                items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                    title: { type: "string" },
-                    url: { type: "string" },
-                    source: { type: "string" }
-                },
-                required: ["title", "url", "source"]
-                }
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          reading: { type: "string" },
+          direction: {
+            type: "string",
+            enum: ["escalatory", "neutral", "de-escalatory"]
+          },
+          confidence: {
+            type: "string",
+            enum: ["Low", "Medium", "High"]
+          },
+          sources: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                title: { type: "string" },
+                url: { type: "string" },
+                source: { type: "string" }
+              },
+              required: ["title", "url", "source"]
             }
-            
-            },
-            required: ["name", "reading", "direction", "confidence", "sources"]
-        }
+          }
         },
-        calculation: {
+        required: ["name", "reading", "direction", "confidence", "sources"]
+      }
+    },
+    calculation: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        scenarios: {
+          type: "array",
+          items: {
             type: "object",
             additionalProperties: false,
             properties: {
-                scenarios: {
+              name: { type: "string" },
+              ai_score: { type: "number" },
+              market_boost: { type: "number" },
+              final_score: { type: "number" },
+              reasoning: {
                 type: "array",
                 items: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                    name: { type: "string" },
-                    ai_score: { type: "number" },
-                    market_boost: { type: "number" },
-                    final_score: { type: "number" },
-                    reasoning: {
-                        type: "array",
-                        items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    signal: { type: "string" },
+                    effect: { type: "string" },
+                    weight: { type: "string" },
+                    sources: {
+                      type: "array",
+                      items: {
                         type: "object",
                         additionalProperties: false,
                         properties: {
-                            signal: { type: "string" },
-                            effect: { type: "string" },
-                            weight: { type: "string" },
-                            sources: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                additionalProperties: false,
-                                properties: {
-                                title: { type: "string" },
-                                url: { type: "string" },
-                                source: { type: "string" }
-                                },
-                                required: ["title", "url", "source"]
-                            }
-                            }
+                          title: { type: "string" },
+                          url: { type: "string" },
+                          source: { type: "string" }
                         },
-                        required: ["signal", "effect", "weight", "sources"]
-                        }
+                        required: ["title", "url", "source"]
+                      }
                     }
-                    },
-                    required: ["name", "ai_score", "market_boost", "final_score", "reasoning"]
+                  },
+                  required: ["signal", "effect", "weight", "sources"]
                 }
-                }
+              }
             },
-            required: ["scenarios"]
-            }
-                    
+            required: ["name", "ai_score", "market_boost", "final_score", "reasoning"]
+          }
+        }
+      },
+      required: ["scenarios"]
+    }
   },
   required: ["summary", "scenarios", "signals", "calculation"]
 };
@@ -644,7 +799,7 @@ const responseSchema = {
 function normalizeScenarioScores(output, scenariosFromConfig, polymarketWeights = {}) {
   const byName = new Map(
     output.scenarios.map((item) => [String(item.name || "").trim().toLowerCase(), item])
-    );
+  );
 
   const merged = scenariosFromConfig.map((scenario) => {
     const found = byName.get(scenario.name.toLowerCase());
@@ -659,6 +814,7 @@ function normalizeScenarioScores(output, scenariosFromConfig, polymarketWeights 
   });
 
   const rawTotal = merged.reduce((sum, item) => sum + item.score, 0);
+
   if (rawTotal <= 0) {
     const equalScore = Math.floor(100 / merged.length);
     return merged.map((item, index) => ({
@@ -686,62 +842,69 @@ function upsertSignal(signals, newSignal) {
 
 async function generateScenarioAssessment(topicConfig, articles, externalSignals) {
   if (!articles.length && !externalSignals.length) {
-  return {
-    summary: "Not enough current source material was available to generate a live assessment.",
-    scenarios: topicConfig.scenarios.map((scenario) => ({
-      ...scenario,
-      score: 25
-    })),
-    signals: topicConfig.trackedSignals.map((signal) => ({
-      name: signal,
-      reading: "No recent evidence available in current fetch.",
-      direction: "neutral",
-      confidence: "Low",
-      sources: []
-    })),
-    calculation: {
+    return {
+      summary: "Not enough current source material was available to generate a live assessment.",
       scenarios: topicConfig.scenarios.map((scenario) => ({
-        name: scenario.name,
-        ai_score: 0,
-        market_boost: 0,
-        final_score: 25,
-        reasoning: []
-      }))
-    }
-  };
-}
+        ...scenario,
+        score: 25
+      })),
+      signals: topicConfig.trackedSignals.map((signal) => ({
+        name: signal,
+        reading: "No recent evidence available in current fetch.",
+        direction: "neutral",
+        confidence: "Low",
+        sources: []
+      })),
+      calculation: {
+        scenarios: topicConfig.scenarios.map((scenario) => ({
+          name: scenario.name,
+          ai_score: 0,
+          market_boost: 0,
+          final_score: 25,
+          reasoning: []
+        }))
+      }
+    };
+  }
 
-  const response = await openai.responses.create({
-    model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-    input: [
-      {
-        role: "developer",
-        content: [
-          {
-            type: "input_text",
-            text: "Produce a concise geopolitical scenario assessment using only the supplied source material and external signal payloads."
-          }
-        ]
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: buildPrompt(topicConfig, articles, externalSignals)
-          }
-        ]
+  const prompt = buildPrompt(topicConfig, articles, externalSignals);
+
+  const response = await Promise.race([
+    openai.responses.create({
+      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      input: [
+        {
+          role: "developer",
+          content: [
+            {
+              type: "input_text",
+              text: "Produce a concise geopolitical scenario assessment using only the supplied source material and external signal payloads."
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: prompt
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "scenario_assessment",
+          schema: responseSchema,
+          strict: true
+        }
       }
-    ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "scenario_assessment",
-        schema: responseSchema,
-        strict: true
-      }
-    }
-  });
+    }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("OpenAI request timed out before Vercel timeout.")), OPENAI_TIMEOUT_FALLBACK_MS)
+    )
+  ]);
 
   const parsed = JSON.parse(response.output_text);
   console.log("RAW MODEL OUTPUT:", JSON.stringify(parsed, null, 2));
@@ -750,13 +913,13 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
     !parsed.scenarios ||
     !Array.isArray(parsed.scenarios) ||
     parsed.scenarios.every((s) => Number(s.score || 0) <= 0)
-    ) {
+  ) {
     parsed.scenarios = topicConfig.scenarios.map((scenario, index) => ({
-        name: scenario.name,
-        description: scenario.description,
-        score: index === 0 ? 15 : index === 1 ? 20 : index === 2 ? 35 : 30
+      name: scenario.name,
+      description: scenario.description,
+      score: index === 0 ? 15 : index === 1 ? 20 : index === 2 ? 35 : 30
     }));
-    }
+  }
 
   const polymarket = externalSignals.find((s) => s.source === "Polymarket");
   const normalizedScenarios = normalizeScenarioScores(
@@ -766,39 +929,39 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
   );
 
   const calculationScenarios = topicConfig.scenarios.map((scenario) => {
-  const rawCalc = (parsed.calculation?.scenarios || []).find(
-    (item) => String(item.name || "").trim().toLowerCase() === scenario.name.toLowerCase()
-  );
+    const rawCalc = (parsed.calculation?.scenarios || []).find(
+      (item) => String(item.name || "").trim().toLowerCase() === scenario.name.toLowerCase()
+    );
 
-  const normalized = normalizedScenarios.find(
-    (item) => item.name.toLowerCase() === scenario.name.toLowerCase()
-  );
+    const normalized = normalizedScenarios.find(
+      (item) => item.name.toLowerCase() === scenario.name.toLowerCase()
+    );
 
-  return {
-    name: scenario.name,
-    ai_score: Number(rawCalc?.ai_score || 0),
-    market_boost: Number(rawCalc?.market_boost || Number(polymarket?.weights?.[scenario.name] || 0) * 20),
-    final_score: Number(normalized?.score || 0),
-    reasoning: Array.isArray(rawCalc?.reasoning) ? rawCalc.reasoning : []
-  };
-});
+    return {
+      name: scenario.name,
+      ai_score: Number(rawCalc?.ai_score || 0),
+      market_boost: Number(
+        rawCalc?.market_boost || Number(polymarket?.weights?.[scenario.name] || 0) * 20
+      ),
+      final_score: Number(normalized?.score || 0),
+      reasoning: Array.isArray(rawCalc?.reasoning) ? rawCalc.reasoning : []
+    };
+  });
 
-  const signals = [...parsed.signals];
+  const signals = Array.isArray(parsed.signals) ? [...parsed.signals] : [];
   for (const ext of externalSignals) {
     if (ext.signal?.name) upsertSignal(signals, ext.signal);
   }
 
- return {
-  summary: parsed.summary,
-  scenarios: normalizedScenarios,
-  signals,
-  calculation: {
-    scenarios: calculationScenarios
-  }
-};
+  return {
+    summary: parsed.summary,
+    scenarios: normalizedScenarios,
+    signals,
+    calculation: {
+      scenarios: calculationScenarios
+    }
+  };
 }
-
-
 
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
@@ -817,47 +980,66 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.time("scenario-assessment-total");
+
     const topic = req.query.topic || "iran";
-const topicConfig = getTopicConfig(topic);
+    const topicConfig = getTopicConfig(topic);
 
-const savedSources = await getMergedSavedSources(topic);
-console.log("TOPIC:", topic);
-console.log("SAVED SOURCES LOADED:", savedSources);
+    console.time("load-saved-sources");
+    const savedSources = await getMergedSavedSources(topic);
+    console.timeEnd("load-saved-sources");
 
-const [articles, oilSignal, polymarketSignal] = await Promise.all([
-  collectTopicCoverage(topicConfig, savedSources),
-  fetchOilSignal(),
-  fetchPolymarketSignal(topicConfig)
-]);
+    console.log("TOPIC:", topic);
+    console.log("SAVED SOURCES LOADED:", savedSources);
 
-const externalSignals = [oilSignal, polymarketSignal];
-const assessment = await generateScenarioAssessment(topicConfig, articles, externalSignals);
+    console.time("collect-topic-coverage");
+    const articlesPromise = collectTopicCoverage(topicConfig, savedSources);
 
-return json(res, 200, {
-  topic: topicConfig.label,
-  updated_at: new Date().toISOString(),
-  summary: assessment.summary,
-  scenarios: assessment.scenarios,
-  signals: assessment.signals,
-  calculation: assessment.calculation,
-  sources: [
-    ...articles.map((article) => ({
-      title: `${article.source}: ${article.title}`,
-      url: article.url
-    })),
-    { title: "Polymarket live markets", url: "https://polymarket.com/" }
-  ],
-    meta: {
-      oil: oilSignal,
-      polymarket: {
-        source: polymarketSignal.source,
-        matchedMarkets: polymarketSignal.matchedMarkets
-      },
-      saved_sources: savedSources,
-      used_article_sources: [...new Set(articles.map((a) => a.source))]
-    }
-});
+    console.time("fetch-oil-signal");
+    const oilSignalPromise = fetchOilSignal().finally(() => console.timeEnd("fetch-oil-signal"));
 
+    console.time("fetch-polymarket-signal");
+    const polymarketSignalPromise = fetchPolymarketSignal(topicConfig).finally(() =>
+      console.timeEnd("fetch-polymarket-signal")
+    );
+
+    const articles = await articlesPromise;
+    console.timeEnd("collect-topic-coverage");
+
+    const [oilSignal, polymarketSignal] = await Promise.all([oilSignalPromise, polymarketSignalPromise]);
+
+    const externalSignals = [oilSignal, polymarketSignal];
+
+    console.time("generate-assessment");
+    const assessment = await generateScenarioAssessment(topicConfig, articles, externalSignals);
+    console.timeEnd("generate-assessment");
+
+    console.timeEnd("scenario-assessment-total");
+
+    return json(res, 200, {
+      topic: topicConfig.label,
+      updated_at: new Date().toISOString(),
+      summary: assessment.summary,
+      scenarios: assessment.scenarios,
+      signals: assessment.signals,
+      calculation: assessment.calculation,
+      sources: [
+        ...articles.map((article) => ({
+          title: `${article.source}: ${article.title}`,
+          url: article.url
+        })),
+        { title: "Polymarket live markets", url: "https://polymarket.com/" }
+      ],
+      meta: {
+        oil: oilSignal,
+        polymarket: {
+          source: polymarketSignal.source,
+          matchedMarkets: polymarketSignal.matchedMarkets
+        },
+        saved_sources: savedSources,
+        used_article_sources: [...new Set(articles.map((a) => a.source))]
+      }
+    });
   } catch (error) {
     console.error("Scenario assessment failed:", error);
     return json(res, 500, {
@@ -865,30 +1047,4 @@ return json(res, 200, {
       message: error.message
     });
   }
-}
-
-
-function ensureSavedSourcePresence(scoredItems, savedSourceNames = [], maxTotal = 8) {
-  const result = [];
-  const usedTitles = new Set();
-
-  for (const sourceName of savedSourceNames) {
-    const match = scoredItems.find(
-      (item) => item.source === sourceName && !usedTitles.has(item.title)
-    );
-    if (match) {
-      result.push(match);
-      usedTitles.add(match.title);
-    }
-  }
-
-  for (const item of scoredItems) {
-    if (result.length >= maxTotal) break;
-    if (!usedTitles.has(item.title)) {
-      result.push(item);
-      usedTitles.add(item.title);
-    }
-  }
-
-  return result.slice(0, maxTotal);
 }
