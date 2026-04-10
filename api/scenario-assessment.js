@@ -645,39 +645,29 @@ async function fetchPolymarketSignal(topicConfig) {
 }
 
 function buildPrompt(topicConfig, articles, externalSignals) {
-  const compactArticles = articles.map((a) => ({
-    source: a.source,
-    title: a.title,
-    url: a.url,
-    published_at: a.published_at,
-    snippet: a.snippet
+  const compactArticles = articles.slice(0, 3).map((a) => ({
+    s: a.source,
+    t: a.title,
+    u: a.url,
+    p: a.published_at,
+    n: a.snippet
   }));
 
   const compactSignals = externalSignals.map((s) => ({
     source: s.source,
     signal: s.signal,
     weights: s.weights || undefined,
-    matchedMarkets: Array.isArray(s.matchedMarkets)
-      ? s.matchedMarkets.slice(0, 5)
-      : undefined
+    matchedMarkets: Array.isArray(s.matchedMarkets) ? s.matchedMarkets.slice(0, 3) : undefined
   }));
 
   return [
     `Assess the current geopolitical outlook for ${topicConfig.label}.`,
-    "",
-    "Use only the supplied articles and external signals.",
-    "Do not invent facts.",
-    "Use these exact scenario names:",
-    "Chaos + Collapse",
-    "Shattered Diplomacy",
-    "Burning Strait",
-    "Cold Containment",
-    "",
-    "Return JSON matching the schema.",
-    "",
+    "Use only supplied evidence.",
+    "Return valid JSON only.",
+    "Use exactly these scenario names:",
+    JSON.stringify(topicConfig.scenarios.map((s) => s.name)),
     "Tracked signals:",
     JSON.stringify(topicConfig.trackedSignals),
-    "",
     "Scenario definitions:",
     JSON.stringify(
       topicConfig.scenarios.map((s) => ({
@@ -687,10 +677,8 @@ function buildPrompt(topicConfig, articles, externalSignals) {
         scenarioSignals: s.scenarioSignals
       }))
     ),
-    "",
     "Articles:",
     JSON.stringify(compactArticles),
-    "",
     "External signals:",
     JSON.stringify(compactSignals)
   ].join("\n");
@@ -844,6 +832,122 @@ function upsertSignal(signals, newSignal) {
   else signals.push(newSignal);
 }
 
+function extractJsonObject(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    throw new Error("Model returned empty output.");
+  }
+
+  const firstBrace = raw.indexOf("{");
+  const lastBrace = raw.lastIndexOf("}");
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error("Model output did not contain a complete JSON object.");
+  }
+
+  return raw.slice(firstBrace, lastBrace + 1);
+}
+
+function safeParseModelJson(response) {
+  const candidates = [];
+
+  if (typeof response?.output_text === "string" && response.output_text.trim()) {
+    candidates.push(response.output_text);
+  }
+
+  if (Array.isArray(response?.output)) {
+    for (const item of response.output) {
+      if (Array.isArray(item?.content)) {
+        for (const content of item.content) {
+          if (typeof content?.text === "string" && content.text.trim()) {
+            candidates.push(content.text);
+          }
+        }
+      }
+    }
+  }
+
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (err) {
+      lastError = err;
+      try {
+        const extracted = extractJsonObject(candidate);
+        return JSON.parse(extracted);
+      } catch (err2) {
+        lastError = err2;
+      }
+    }
+  }
+
+  throw new Error(`Failed to parse model JSON. ${lastError ? lastError.message : "No parseable content found."}`);
+}
+
+function buildFallbackAssessment(topicConfig, articles, externalSignals, summaryPrefix = "") {
+  const polymarket = externalSignals.find((s) => s.source === "Polymarket");
+
+  const fallbackScenarios = normalizeScenarioScores(
+    {
+      scenarios: topicConfig.scenarios.map((scenario, index) => ({
+        name: scenario.name,
+        description: scenario.description,
+        score: index === 0 ? 15 : index === 1 ? 20 : index === 2 ? 35 : 30
+      }))
+    },
+    topicConfig.scenarios,
+    polymarket?.weights || {}
+  );
+
+  const fallbackSignals = topicConfig.trackedSignals.map((signalName) => {
+    const externalMatch = externalSignals.find((s) => s.signal?.name === signalName);
+    if (externalMatch?.signal) return externalMatch.signal;
+
+    const supportingArticles = articles
+      .filter((a) => {
+        const haystack = `${a.title} ${a.snippet}`.toLowerCase();
+        const firstWord = signalName.toLowerCase().split(" ")[0];
+        return haystack.includes(firstWord);
+      })
+      .slice(0, 2)
+      .map((a) => ({
+        title: a.title,
+        url: a.url,
+        source: a.source
+      }));
+
+    return {
+      name: signalName,
+      reading: supportingArticles.length
+        ? "Relevant reporting exists in the supplied articles, but a fallback assessment was used."
+        : "No clear reading available from the current fetch.",
+      direction: "neutral",
+      confidence: "Low",
+      sources: supportingArticles
+    };
+  });
+
+  return {
+    summary: `${summaryPrefix} Current reporting still points to sustained regional security pressure, energy disruption risk, and uncertain diplomacy.`.trim(),
+    scenarios: fallbackScenarios,
+    signals: fallbackSignals,
+    calculation: {
+      scenarios: topicConfig.scenarios.map((scenario) => {
+        const finalScenario = fallbackScenarios.find((s) => s.name === scenario.name);
+        return {
+          name: scenario.name,
+          ai_score: 0,
+          market_boost: Number(polymarket?.weights?.[scenario.name] || 0) * 20,
+          final_score: Number(finalScenario?.score || 0),
+          reasoning: []
+        };
+      })
+    }
+  };
+}
+
 async function generateScenarioAssessment(topicConfig, articles, externalSignals) {
   if (!articles.length && !externalSignals.length) {
     return {
@@ -873,7 +977,7 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
 
   const prompt = buildPrompt(topicConfig, articles, externalSignals);
 
-  let response;
+    let response;
   try {
     response = await Promise.race([
       openai.responses.create({
@@ -884,7 +988,7 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
             content: [
               {
                 type: "input_text",
-                text: "Produce a concise geopolitical scenario assessment using only the supplied source material and external signal payloads."
+                text: "Produce a concise geopolitical scenario assessment using only the supplied source material and external signal payloads. Return JSON only."
               }
             ]
           },
@@ -898,7 +1002,7 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
             ]
           }
         ],
-        max_output_tokens: 2200,
+        max_output_tokens: 1600,
         text: {
           format: {
             type: "json_schema",
@@ -917,70 +1021,20 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
     ]);
   } catch (error) {
     console.error("OpenAI scenario generation failed:", error.message);
-
-    const polymarket = externalSignals.find((s) => s.source === "Polymarket");
-    const fallbackScenarios = normalizeScenarioScores(
-      {
-        scenarios: topicConfig.scenarios.map((scenario, index) => ({
-          name: scenario.name,
-          description: scenario.description,
-          score: index === 0 ? 15 : index === 1 ? 20 : index === 2 ? 35 : 30
-        }))
-      },
-      topicConfig.scenarios,
-      polymarket?.weights || {}
-    );
-
-    const fallbackSignals = topicConfig.trackedSignals.map((signalName) => {
-      const externalMatch = externalSignals.find((s) => s.signal?.name === signalName);
-      if (externalMatch?.signal) return externalMatch.signal;
-
-      const supportingArticles = articles
-        .filter((a) => {
-          const haystack = `${a.title} ${a.snippet}`.toLowerCase();
-          return haystack.includes(signalName.toLowerCase().split(" ")[0]);
-        })
-        .slice(0, 2)
-        .map((a) => ({
-          title: a.title,
-          url: a.url,
-          source: a.source
-        }));
-
-      return {
-        name: signalName,
-        reading: supportingArticles.length
-          ? "Relevant reporting exists in the supplied articles, but the model response timed out."
-          : "No clear reading available from the current fetch.",
-        direction: "neutral",
-        confidence: "Low",
-        sources: supportingArticles
-      };
-    });
-
-    return {
-      summary:
-        "A fallback assessment was used because the model did not return in time. Current reporting still points to sustained regional security pressure, energy disruption risk, and uncertain diplomacy.",
-      scenarios: fallbackScenarios,
-      signals: fallbackSignals,
-      calculation: {
-        scenarios: topicConfig.scenarios.map((scenario) => {
-          const finalScenario = fallbackScenarios.find((s) => s.name === scenario.name);
-          return {
-            name: scenario.name,
-            ai_score: 0,
-            market_boost: Number(polymarket?.weights?.[scenario.name] || 0) * 20,
-            final_score: Number(finalScenario?.score || 0),
-            reasoning: []
-          };
-        })
-      }
-    };
+    return buildFallbackAssessment(topicConfig, articles, externalSignals, "The model request failed or timed out.");
   }
 
-  const parsed = JSON.parse(response.output_text);
-  console.log("RAW MODEL OUTPUT:", JSON.stringify(parsed, null, 2));
+  let parsed;
+  try {
+    parsed = safeParseModelJson(response);
+  } catch (parseError) {
+    console.error("MODEL RAW OUTPUT TEXT:", response?.output_text || "");
+    console.error("MODEL FULL RESPONSE:", JSON.stringify(response, null, 2));
+    console.error("Model JSON parse failed:", parseError.message);
+    return buildFallbackAssessment(topicConfig, articles, externalSignals, "The model returned malformed JSON.");
+  }
 
+  console.log("RAW MODEL OUTPUT:", JSON.stringify(parsed, null, 2));
   if (
     !parsed.scenarios ||
     !Array.isArray(parsed.scenarios) ||
