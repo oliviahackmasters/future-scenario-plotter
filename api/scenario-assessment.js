@@ -7,10 +7,10 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const RSS_FETCH_TIMEOUT_MS = 8000;
 const JSON_FETCH_TIMEOUT_MS = 8000;
-const OPENAI_TIMEOUT_FALLBACK_MS = 20000;
+const OPENAI_TIMEOUT_FALLBACK_MS = 45000;
 const MAX_ITEMS_PER_FEED = 6;
-const MAX_ARTICLES_FOR_MODEL = 4;
-const MAX_FILTERED_ITEMS = 6;
+const MAX_ARTICLES_FOR_MODEL = 3;
+const MAX_FILTERED_ITEMS = 5;
 const MIN_MATCHES_REQUIRED = 2;
 
 const TOPICS = {
@@ -146,6 +146,16 @@ function json(res, status, body) {
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.send(JSON.stringify(body));
+}
+
+function startTimer(label) {
+  return { label, startedAt: Date.now() };
+}
+
+function endTimer(timer) {
+  if (!timer || !timer.label || !timer.startedAt) return;
+  const ms = Date.now() - timer.startedAt;
+  console.log(`${timer.label}: ${ms.toFixed(1)}ms`);
 }
 
 function withTimeout(ms) {
@@ -635,60 +645,54 @@ async function fetchPolymarketSignal(topicConfig) {
 }
 
 function buildPrompt(topicConfig, articles, externalSignals) {
+  const compactArticles = articles.map((a) => ({
+    source: a.source,
+    title: a.title,
+    url: a.url,
+    published_at: a.published_at,
+    snippet: a.snippet
+  }));
+
+  const compactSignals = externalSignals.map((s) => ({
+    source: s.source,
+    signal: s.signal,
+    weights: s.weights || undefined,
+    matchedMarkets: Array.isArray(s.matchedMarkets)
+      ? s.matchedMarkets.slice(0, 5)
+      : undefined
+  }));
+
   return [
-    "You are a geopolitical scenario analyst.",
+    `Assess the current geopolitical outlook for ${topicConfig.label}.`,
     "",
-    `Topic: ${topicConfig.label}`,
+    "Use only the supplied articles and external signals.",
+    "Do not invent facts.",
+    "Use these exact scenario names:",
+    "Chaos + Collapse",
+    "Shattered Diplomacy",
+    "Burning Strait",
+    "Cold Containment",
+    "",
+    "Return JSON matching the schema.",
     "",
     "Tracked signals:",
-    ...topicConfig.trackedSignals.map((signal) => `- ${signal}`),
+    JSON.stringify(topicConfig.trackedSignals),
     "",
-    "Scenarios:",
-    ...topicConfig.scenarios.map(
-      (scenario, index) =>
-        `${index + 1}. ${scenario.name} = ${scenario.description} GCC reality: ${scenario.gccReality}. Key scenario signals: ${scenario.scenarioSignals.join(", ")}.`
+    "Scenario definitions:",
+    JSON.stringify(
+      topicConfig.scenarios.map((s) => ({
+        name: s.name,
+        description: s.description,
+        gccReality: s.gccReality,
+        scenarioSignals: s.scenarioSignals
+      }))
     ),
-    "Use these exact scenario names in the scenarios array and calculation array:",
-    "- Chaos + Collapse",
-    "- Shattered Diplomacy",
-    "- Burning Strait",
-    "- Cold Containment",
-    "",
-    "Tasks:",
-    "1. Read the supplied source summaries.",
-    "2. Extract only evidence relevant to the tracked signals.",
-    "3. Score each scenario from 0 to 100 based on the signals.",
-    "4. Normalize the scenario scores so the total equals 100.",
-    "5. Give a concise summary of the current assessment.",
-    "6. Do not invent facts. Distinguish evidence from inference.",
-    "7. For each tracked signal, include 1 to 3 supporting source items from the supplied articles.",
-    "8. Only cite supplied articles as sources for signal-level evidence.",
-    "9. For each signal source, return title, url, and source name.",
-    "10. Use the structured external signals as additional context, especially for oil prices and prediction market odds.",
-    "11. If narrative reporting and external signals conflict, mention that in the summary or relevant signal reading.",
-    "12. Treat direct oil-market reporting from Financial Times as a preferred narrative source for the oil prices signal.",
-    "13. Interpret each scenario through the GCC lens given in the scenario definitions.",
-    "14. Pay close attention to whether oil flows are disrupted versus fully halted.",
-    "15. Distinguish between regime weakening, leadership fractures, and full loss of central command.",
-    "16. Distinguish between limited symbolic retaliation and direct GCC military retaliation.",
-    "",
-    "Output requirements:",
-    "- Return valid JSON matching the required schema.",
-    "- Every signal must include: name, reading, direction, confidence, and sources.",
-    "- sources must be an array of objects with title, url, and source.",
-    "- Do not include sources that are not present in the supplied articles list.",
-    "- Include a calculation object.",
-    "- For each scenario, include ai_score, market_boost, final_score, and reasoning.",
-    "- In reasoning, explain which signals affected the scenario, whether they increased or decreased it, how strongly they mattered, and which supplied sources supported that judgment.",
-    "- Use only supplied articles as sources in reasoning.",
     "",
     "Articles:",
-    JSON.stringify(articles, null, 2),
+    JSON.stringify(compactArticles),
     "",
     "External signals:",
-    JSON.stringify(externalSignals, null, 2),
-    "",
-    "Return JSON matching the schema."
+    JSON.stringify(compactSignals)
   ].join("\n");
 }
 
@@ -869,42 +873,110 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
 
   const prompt = buildPrompt(topicConfig, articles, externalSignals);
 
-  const response = await Promise.race([
-    openai.responses.create({
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-      input: [
-        {
-          role: "developer",
-          content: [
-            {
-              type: "input_text",
-              text: "Produce a concise geopolitical scenario assessment using only the supplied source material and external signal payloads."
-            }
-          ]
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: prompt
-            }
-          ]
+  let response;
+  try {
+    response = await Promise.race([
+      openai.responses.create({
+        model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+        input: [
+          {
+            role: "developer",
+            content: [
+              {
+                type: "input_text",
+                text: "Produce a concise geopolitical scenario assessment using only the supplied source material and external signal payloads."
+              }
+            ]
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: prompt
+              }
+            ]
+          }
+        ],
+        max_output_tokens: 2200,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "scenario_assessment",
+            schema: responseSchema,
+            strict: true
+          }
         }
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "scenario_assessment",
-          schema: responseSchema,
-          strict: true
-        }
+      }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`OpenAI request exceeded ${OPENAI_TIMEOUT_FALLBACK_MS}ms.`)),
+          OPENAI_TIMEOUT_FALLBACK_MS
+        )
+      )
+    ]);
+  } catch (error) {
+    console.error("OpenAI scenario generation failed:", error.message);
+
+    const polymarket = externalSignals.find((s) => s.source === "Polymarket");
+    const fallbackScenarios = normalizeScenarioScores(
+      {
+        scenarios: topicConfig.scenarios.map((scenario, index) => ({
+          name: scenario.name,
+          description: scenario.description,
+          score: index === 0 ? 15 : index === 1 ? 20 : index === 2 ? 35 : 30
+        }))
+      },
+      topicConfig.scenarios,
+      polymarket?.weights || {}
+    );
+
+    const fallbackSignals = topicConfig.trackedSignals.map((signalName) => {
+      const externalMatch = externalSignals.find((s) => s.signal?.name === signalName);
+      if (externalMatch?.signal) return externalMatch.signal;
+
+      const supportingArticles = articles
+        .filter((a) => {
+          const haystack = `${a.title} ${a.snippet}`.toLowerCase();
+          return haystack.includes(signalName.toLowerCase().split(" ")[0]);
+        })
+        .slice(0, 2)
+        .map((a) => ({
+          title: a.title,
+          url: a.url,
+          source: a.source
+        }));
+
+      return {
+        name: signalName,
+        reading: supportingArticles.length
+          ? "Relevant reporting exists in the supplied articles, but the model response timed out."
+          : "No clear reading available from the current fetch.",
+        direction: "neutral",
+        confidence: "Low",
+        sources: supportingArticles
+      };
+    });
+
+    return {
+      summary:
+        "A fallback assessment was used because the model did not return in time. Current reporting still points to sustained regional security pressure, energy disruption risk, and uncertain diplomacy.",
+      scenarios: fallbackScenarios,
+      signals: fallbackSignals,
+      calculation: {
+        scenarios: topicConfig.scenarios.map((scenario) => {
+          const finalScenario = fallbackScenarios.find((s) => s.name === scenario.name);
+          return {
+            name: scenario.name,
+            ai_score: 0,
+            market_boost: Number(polymarket?.weights?.[scenario.name] || 0) * 20,
+            final_score: Number(finalScenario?.score || 0),
+            reasoning: []
+          };
+        })
       }
-    }),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("OpenAI request timed out before Vercel timeout.")), OPENAI_TIMEOUT_FALLBACK_MS)
-    )
-  ]);
+    };
+  }
 
   const parsed = JSON.parse(response.output_text);
   console.log("RAW MODEL OUTPUT:", JSON.stringify(parsed, null, 2));
@@ -979,42 +1051,43 @@ export default async function handler(req, res) {
     });
   }
 
-  try {
-    console.time("scenario-assessment-total");
+    try {
+    const totalTimer = startTimer("scenario-assessment-total");
 
     const topic = req.query.topic || "iran";
     const topicConfig = getTopicConfig(topic);
 
-    console.time("load-saved-sources");
+    const savedSourcesTimer = startTimer("load-saved-sources");
     const savedSources = await getMergedSavedSources(topic);
-    console.timeEnd("load-saved-sources");
+    endTimer(savedSourcesTimer);
 
     console.log("TOPIC:", topic);
     console.log("SAVED SOURCES LOADED:", savedSources);
 
-    console.time("collect-topic-coverage");
+    const coverageTimer = startTimer("collect-topic-coverage");
     const articlesPromise = collectTopicCoverage(topicConfig, savedSources);
 
-    console.time("fetch-oil-signal");
-    const oilSignalPromise = fetchOilSignal().finally(() => console.timeEnd("fetch-oil-signal"));
+    const oilTimer = startTimer("fetch-oil-signal");
+    const oilSignalPromise = fetchOilSignal().finally(() => endTimer(oilTimer));
 
-    console.time("fetch-polymarket-signal");
-    const polymarketSignalPromise = fetchPolymarketSignal(topicConfig).finally(() =>
-      console.timeEnd("fetch-polymarket-signal")
-    );
+    const polyTimer = startTimer("fetch-polymarket-signal");
+    const polymarketSignalPromise = fetchPolymarketSignal(topicConfig).finally(() => endTimer(polyTimer));
 
     const articles = await articlesPromise;
-    console.timeEnd("collect-topic-coverage");
+    endTimer(coverageTimer);
 
-    const [oilSignal, polymarketSignal] = await Promise.all([oilSignalPromise, polymarketSignalPromise]);
+    const [oilSignal, polymarketSignal] = await Promise.all([
+      oilSignalPromise,
+      polymarketSignalPromise
+    ]);
 
     const externalSignals = [oilSignal, polymarketSignal];
 
-    console.time("generate-assessment");
+    const assessmentTimer = startTimer("generate-assessment");
     const assessment = await generateScenarioAssessment(topicConfig, articles, externalSignals);
-    console.timeEnd("generate-assessment");
+    endTimer(assessmentTimer);
 
-    console.timeEnd("scenario-assessment-total");
+    endTimer(totalTimer);
 
     return json(res, 200, {
       topic: topicConfig.label,
