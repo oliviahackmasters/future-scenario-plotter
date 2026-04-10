@@ -87,6 +87,7 @@ await put(
   pathname,
   JSON.stringify(existing, null, 2),
   {
+    access: "public",
     addRandomSuffix: false,
     contentType: "application/json",
     allowOverwrite: true
