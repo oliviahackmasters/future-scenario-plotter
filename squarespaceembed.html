@@ -416,18 +416,58 @@
   gap:12px;
 }
 
-#hmScenarioPlotter .hm-plot-cell{
-  border:1px solid var(--hm-copper);
-  min-height:130px;
-  padding:14px 12px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  text-align:center;
-  background:rgba(209,128,87,0);
-  transition:background 180ms ease;
-}
+    #hmScenarioPlotter .hm-timeline-card{
+      border:1px solid var(--hm-copper);
+      background:rgba(255,255,255,0.02);
+      padding:14px;
+      margin:14px 0;
+    }
+
+    #hmScenarioPlotter .hm-timeline-summary{
+      font-size:12px;
+      line-height:1.5;
+      color:rgba(255,255,255,0.84);
+      margin:8px 0 10px 0;
+    }
+
+    #hmScenarioPlotter .hm-timeline-legend{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-bottom:10px;
+    }
+
+    #hmScenarioPlotter .hm-timeline-legend-item{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.6px;
+      color:rgba(255,255,255,0.85);
+    }
+
+    #hmScenarioPlotter .hm-timeline-legend-dot{
+      width:12px;
+      height:12px;
+      border-radius:50%;
+      display:inline-block;
+      border:1px solid rgba(255,255,255,0.3);
+    }
+
+    #hmScenarioPlotter .hm-timeline-graph{
+      width:100%;
+      overflow:hidden;
+      border:1px solid rgba(209,128,87,0.45);
+      background:rgba(255,255,255,0.01);
+    }
+
+    #hmScenarioPlotter .hm-timeline-graph svg{
+      display:block;
+      width:100%;
+      height:240px;
+    }
+
 
 #hmScenarioPlotter .hm-plot-cell-title{
   font-size:14px; /* was 18px */
@@ -888,6 +928,16 @@
       <div class="hm-loader-text">Refreshing signals and scenario weights</div>
     </div>
 
+    <div class="hm-timeline-card" id="hmTimelineCard">
+      <div class="hm-msg-title">Prediction timeline</div>
+      <div class="hm-note hm-timeline-note" id="hmTimelineNote">Historical score data is stored locally each day.</div>
+      <div class="hm-timeline-summary" id="hmTimelineSummary">Latest daily trend for core scenario probabilities.</div>
+      <div class="hm-timeline-legend" id="hmTimelineLegend"></div>
+      <div class="hm-timeline-graph" id="hmTimelineGraph">
+        <svg viewBox="0 0 720 280" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
     <div class="hm-results-grid" id="hmScenarioGrid"></div>
 
     <div class="hm-row">
@@ -1041,19 +1091,55 @@
             ai_score: 40,
             market_boost: 7,
             final_score: 47,
-            reasoning: [
-              {
-                signal: "Maritime disruption",
-                effect: "Increased likelihood due to elevated Strait-related risk.",
-                weight: "high",
-                sources: [
-                  { title: "BBC Middle East", url: "#", source: "BBC" }
-                ]
-              }
-            ]
+            reasoning: "Increased likelihood due to elevated Strait-related risk."
           }
         ]
-      }
+      },
+      history: [
+  {
+    date: "2026-03-27",
+    updated_at: "2026-03-27T09:00:00.000Z",
+    short_summary: "Maritime disruption risk dominated the day’s reading.",
+    top_headline: "Demo: Strait risk remains elevated",
+    top_headline_url: "#",
+    used_sources: [{ name: "BBC World", url: "#" }, { name: "World Monitor", url: "#" }],
+    scenario_scores: [
+      { name: "Chaos + Collapse", score: 15 },
+      { name: "Shattered Diplomacy", score: 19 },
+      { name: "Burning Strait", score: 42 },
+      { name: "Cold Containment", score: 24 }
+    ]
+  },
+  {
+    date: "2026-03-30",
+    updated_at: "2026-03-30T09:00:00.000Z",
+    short_summary: "Energy disruption stayed high while diplomacy remained weak.",
+    top_headline: "Demo: Regional pressure persists",
+    top_headline_url: "#",
+    used_sources: [{ name: "BBC World", url: "#" }, { name: "Selected social feed", url: "#" }],
+    scenario_scores: [
+      { name: "Chaos + Collapse", score: 19 },
+      { name: "Shattered Diplomacy", score: 14 },
+      { name: "Burning Strait", score: 43 },
+      { name: "Cold Containment", score: 24 }
+    ]
+  },
+  {
+    date: "2026-04-10",
+    updated_at: "2026-04-10T09:00:00.000Z",
+    short_summary: "Containment improved slightly but war risk remains elevated.",
+    top_headline: "Demo: Containment edges up",
+    top_headline_url: "#",
+    used_sources: [{ name: "FT Energy", url: "#" }, { name: "Polymarket", url: "https://polymarket.com/" }],
+    scenario_scores: [
+      { name: "Chaos + Collapse", score: 10 },
+      { name: "Shattered Diplomacy", score: 24 },
+      { name: "Burning Strait", score: 31 },
+      { name: "Cold Containment", score: 35 }
+    ]
+  }
+],
+
       
     };
 
@@ -1066,6 +1152,10 @@
     const error = document.getElementById("hmError");
     const refreshBtn = document.getElementById("hmRefreshBtn");
     const sourcesBtn = document.getElementById("hmSourcesBtn");
+    const timelineNote = document.getElementById("hmTimelineNote");
+    const timelineSummary = document.getElementById("hmTimelineSummary");
+    const timelineLegend = document.getElementById("hmTimelineLegend");
+    const timelineGraph = document.getElementById("hmTimelineGraph");
 
 const sourceNameInput = document.getElementById("hmSourceName");
 const sourceWebsiteInput = document.getElementById("hmSourceWebsite");
@@ -1241,22 +1331,259 @@ async function hmAddSelectedBuiltInSources(builtIn, savedNames, addAll = false) 
     await hmRefreshAssessment();
   } catch (err) {
     sourceDiscoveryStatus.textContent = "Could not add built-in sources.";
+    error.style.display = "block";
+
     error.textContent = err.message || "Failed to add built-in sources.";
   } finally {
     addSourceBtn.disabled = false;
   }
 }
 
+const HM_SCENARIO_COLORS = {
+    "Chaos + Collapse": "#f4d3b4",
+    "Shattered Diplomacy": "#f0b56a",
+    "Burning Strait": "#d18057",
+    "Cold Containment": "#9b5b0a"
+  };
+
+  function hmFormatDateLabel(dateString) {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return dateString;
+    const dd = String(date.getDate()).padStart(2, "0");
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const yyyy = date.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+
+  function hmBuildAreaPath(points, baselineY) {
+    if (!points.length) return "";
+    const line = points
+      .map((p, index) => `${index === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
+      .join(" ");
+
+    const close = `L ${points[points.length - 1].x.toFixed(2)} ${baselineY.toFixed(2)} L ${points[0].x.toFixed(2)} ${baselineY.toFixed(2)} Z`;
+    return `${line} ${close}`;
+  }
+
+  function hmBuildLinePath(points) {
+    if (!points.length) return "";
+    return points
+      .map((p, index) => `${index === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
+      .join(" ");
+  }
+
+  function hmSummarizeTimeline(history) {
+    if (!Array.isArray(history) || history.length < 2) {
+      return "Builds up one saved snapshot per day. More history will make the trend more useful.";
+    }
+
+    const latest = history[history.length - 1];
+    const previous = history[history.length - 2];
+
+    const latestScores = new Map((latest.scenario_scores || []).map((s) => [s.name, Number(s.score || 0)]));
+    const previousScores = new Map((previous.scenario_scores || []).map((s) => [s.name, Number(s.score || 0)]));
+
+    let biggestMove = null;
+
+    for (const [name, score] of latestScores.entries()) {
+      const prev = previousScores.get(name);
+      if (typeof prev !== "number") continue;
+      const delta = score - prev;
+
+      if (!biggestMove || Math.abs(delta) > Math.abs(biggestMove.delta)) {
+        biggestMove = { name, delta, score };
+      }
+    }
+
+    if (!biggestMove) {
+      return "Latest daily trend for core scenario probabilities.";
+    }
+
+    if (biggestMove.delta === 0) {
+      return `${biggestMove.name} is unchanged at ${biggestMove.score}%.`;
+    }
+
+    const dir = biggestMove.delta > 0 ? "up" : "down";
+    return `${biggestMove.name} moved ${dir} ${Math.abs(biggestMove.delta)} points to ${biggestMove.score}% since the previous saved snapshot.`;
+  }
+
+  function renderTimeline(history) {
+    const svg = timelineGraph.querySelector("svg");
+
+    if (!svg) return;
+
+    if (!Array.isArray(history) || !history.length) {
+      timelineNote.textContent = "No historical score data available yet.";
+      timelineSummary.textContent = "Save a few daily runs to see the timeline.";
+      timelineLegend.innerHTML = "";
+      svg.innerHTML = `
+        <text x="50%" y="50%" text-anchor="middle" fill="rgba(255,255,255,0.55)" font-size="14">
+          No timeline data yet
+        </text>
+      `;
+      return;
+    }
+
+    const sortedHistory = [...history]
+      .filter((item) => item && item.date && Array.isArray(item.scenario_scores))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+    if (!sortedHistory.length) {
+      timelineNote.textContent = "No historical score data available yet.";
+      timelineSummary.textContent = "Save a few daily runs to see the timeline.";
+      timelineLegend.innerHTML = "";
+      svg.innerHTML = "";
+      return;
+    }
+
+    const width = 720;
+    const height = 280;
+    const margin = { top: 16, right: 18, bottom: 42, left: 50 };
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+    const baselineY = margin.top + innerHeight;
+
+    const scenarioNames = [
+      "Chaos + Collapse",
+      "Shattered Diplomacy",
+      "Burning Strait",
+      "Cold Containment"
+    ];
+
+    const pointsByScenario = new Map(
+      scenarioNames.map((name) => [name, []])
+    );
+
+    const xForIndex = (index, total) => {
+      if (total <= 1) return margin.left + innerWidth / 2;
+      return margin.left + (index / (total - 1)) * innerWidth;
+    };
+
+    const yForScore = (score) => {
+      const clamped = Math.max(0, Math.min(100, Number(score || 0)));
+      return margin.top + innerHeight - (clamped / 100) * innerHeight;
+    };
+
+    sortedHistory.forEach((entry, index) => {
+      const scoreMap = new Map((entry.scenario_scores || []).map((s) => [s.name, Number(s.score || 0)]));
+      scenarioNames.forEach((name) => {
+        pointsByScenario.get(name).push({
+          x: xForIndex(index, sortedHistory.length),
+          y: yForScore(scoreMap.get(name) || 0),
+          score: scoreMap.get(name) || 0,
+          date: entry.date,
+          summary: entry.short_summary || entry.summary || "",
+          headline: entry.top_headline || "",
+          sourceCount: Array.isArray(entry.used_sources) ? entry.used_sources.length : 0
+        });
+      });
+    });
+
+    timelineNote.textContent =
+      sortedHistory.length === 1
+        ? "Historical score data is stored locally each day. One snapshot saved so far."
+        : `Historical score data is stored locally each day. Showing ${sortedHistory.length} saved day${sortedHistory.length === 1 ? "" : "s"}.`;
+
+    timelineSummary.textContent = hmSummarizeTimeline(sortedHistory);
+
+    timelineLegend.innerHTML = scenarioNames
+      .map((name) => `
+        <div class="hm-timeline-legend-item">
+          <span class="hm-timeline-legend-dot" style="background:${HM_SCENARIO_COLORS[name]};"></span>
+          <span>${name}</span>
+        </div>
+      `)
+      .join("");
+
+    const gridValues = [0, 20, 40, 60, 80, 100];
+    const gridLines = gridValues.map((value) => {
+      const y = yForScore(value);
+      return `
+        <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="rgba(255,255,255,0.14)" stroke-width="1" />
+        <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" fill="rgba(255,255,255,0.8)" font-size="11">${value}</text>
+      `;
+    }).join("");
+
+    const xLabels = sortedHistory.map((entry, index) => {
+      const x = xForIndex(index, sortedHistory.length);
+      return `
+        <text x="${x}" y="${height - 14}" text-anchor="middle" fill="rgba(255,255,255,0.82)" font-size="11">
+          ${hmEscapeHtml(hmFormatDateLabel(entry.date))}
+        </text>
+      `;
+    }).join("");
+
+    const areaOrder = [
+      "Chaos + Collapse",
+      "Shattered Diplomacy",
+      "Burning Strait",
+      "Cold Containment"
+    ];
+
+    const areas = areaOrder.map((name) => {
+      const points = pointsByScenario.get(name) || [];
+      const color = HM_SCENARIO_COLORS[name] || "#D18057";
+      const areaPath = hmBuildAreaPath(points, baselineY);
+      const linePath = hmBuildLinePath(points);
+
+      const circles = points.map((p) => `
+        <circle cx="${p.x}" cy="${p.y}" r="3.2" fill="${color}">
+          <title>${name}
+${hmFormatDateLabel(p.date)} · ${p.score}%
+${p.headline || ""}
+${p.summary || ""}</title>
+        </circle>
+      `).join("");
+
+      return `
+        <path d="${areaPath}" fill="${color}" fill-opacity="0.18"></path>
+        <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2.5"></path>
+        ${circles}
+      `;
+    }).join("");
+
+    const latestEntry = sortedHistory[sortedHistory.length - 1];
+    const sourceNames = Array.isArray(latestEntry.used_sources)
+      ? latestEntry.used_sources.map((source) => {
+          if (typeof source === "string") return source;
+          return source?.name || "";
+        }).filter(Boolean)
+      : [];
+
+    svg.innerHTML = `
+      <rect x="0" y="0" width="${width}" height="${height}" fill="transparent"></rect>
+      ${gridLines}
+      <line x1="${margin.left}" y1="${baselineY}" x2="${width - margin.right}" y2="${baselineY}" stroke="rgba(255,255,255,0.22)" stroke-width="1.2" />
+      <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${baselineY}" stroke="rgba(255,255,255,0.22)" stroke-width="1.2" />
+      ${areas}
+      ${xLabels}
+      <text x="22" y="${margin.top + innerHeight / 2}" transform="rotate(-90 22 ${margin.top + innerHeight / 2})" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="12">SCENARIO LIKELIHOOD (%)</text>
+      <text x="${margin.left + innerWidth / 2}" y="${height - 4}" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="12">DATE</text>
+    `;
+
+    if (sourceNames.length) {
+      timelineNote.textContent += ` Latest snapshot used: ${sourceNames.join(", ")}.`;
+    }
+  }
+
 async function hmRefreshAssessment() {
   loader.style.display = "block";
+  error.style.display = "none";
   error.textContent = "";
 
   try {
     const data = await hmFetchJson(API_URL);
     render(data);
     status.textContent = `Updated ${relativeTime(data.updated_at || new Date().toISOString())}`;
+    status.classList.remove("is-error");
   } catch (err) {
-    error.textContent = err.message || "Failed to refresh assessment.";
+    render(fallbackData);
+    error.style.display = "block";
+    error.textContent = `Live API unavailable. Showing fallback demo data. ${err.message || "Failed to refresh assessment."}`;
+    status.textContent = "Fallback demo mode";
+    status.classList.add("is-error");
   } finally {
     loader.style.display = "none";
   }
@@ -1274,6 +1601,7 @@ async function hmDiscoverAndAddSource() {
   addSourceBtn.disabled = true;
   sourceDiscoveryStatus.textContent = "Finding source...";
   error.textContent = "";
+  error.style.display = "none";
 
   try {
     const discovered = await hmFetchJson(DISCOVER_SOURCE_API_URL, {
@@ -1297,6 +1625,7 @@ async function hmDiscoverAndAddSource() {
     await hmRefreshAssessment();
   } catch (err) {
     sourceDiscoveryStatus.textContent = "";
+    error.style.display = "block";
     error.textContent = err.message || "Could not find and add source.";
   } finally {
     addSourceBtn.disabled = false;
@@ -1314,6 +1643,8 @@ window.hmDeleteSource = async function hmDeleteSource(id) {
     await hmLoadSavedSources();
     await hmRefreshAssessment();
   } catch (err) {
+    error.style.display = "block";
+
     error.textContent = err.message || "Could not delete source.";
   }
 };
@@ -1329,6 +1660,8 @@ window.hmToggleSourceEnabled = async function hmToggleSourceEnabled(id, enabled)
     await hmLoadSavedSources();
     await hmRefreshAssessment();
   } catch (err) {
+    error.style.display = "block";
+
     error.textContent = err.message || "Could not update source.";
   }
 };
@@ -1379,6 +1712,7 @@ const calcPanel = document.getElementById("hmCalcPanel");
       `).join("");
 
       renderPlotHeatmap(data.scenarios || []);
+      renderTimeline(data.history || []);
 
       signalTable.innerHTML = (data.signals || []).map(signal => `
         <div class="hm-signal-row">
@@ -1467,61 +1801,21 @@ function renderPlotHeatmap(scenarios) {
   });
 }
 
-async function loadSavedSources() {
-  try {
-    await hmLoadSavedSources();
-  } catch (err) {
-    console.error(err);
-  }
-}
 
 
-
-savedSourcesEl.addEventListener("click", async (event) => {
-  const btn = event.target.closest("[data-action]");
-  if (!btn) return;
-
-  const action = btn.dataset.action;
-  const id = btn.dataset.id;
-
-if (action === "delete") {
-  await fetch(SOURCES_API_URL, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id })
-  });
-  await loadSavedSources();
-  await loadAssessment();
-  return;
-}
-
-if (action === "toggle") {
-  const currentRow = btn.closest(".hm-saved-source");
-  const isDisabled = currentRow?.dataset.enabled === "false";
-
-  await fetch(SOURCES_API_URL, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, enabled: isDisabled })
-  });
-
-  await loadSavedSources();
-  await loadAssessment();
-}
-});
 
 function renderCalculation(calculation) {
   const items = calculation?.scenarios || [];
 
   calcPanel.innerHTML = items.map((scenario) => `
     <div class="hm-calc-scenario">
-      <div class="hm-calc-title">${scenario.name}</div>
+      <div class="hm-calc-title">${hmEscapeHtml(scenario.name)}</div>
       <div class="hm-calc-meta">
-        AI score: ${scenario.ai_score} | Market boost: ${scenario.market_boost} | Final score: ${scenario.final_score}%
+        AI score: ${Number(scenario.ai_score || 0)} | Market boost: ${Number(scenario.market_boost || 0)} | Final score: ${Number(scenario.final_score || 0)}%
       </div>
       ${scenario.reasoning ? `
         <div class="hm-calc-reason">
-          <div class="hm-calc-reasoning">${scenario.reasoning}</div>
+          <div class="hm-calc-reasoning">${hmEscapeHtml(scenario.reasoning)}</div>
         </div>
       ` : ""}
     </div>
@@ -1529,17 +1823,21 @@ function renderCalculation(calculation) {
 }
 
 
-hmLoadSavedSources().catch((err) => {
-  error.textContent = err.message || "Failed to load saved sources.";
-});
+async function hmInit() {
+  loader.style.display = "block";
+  error.style.display = "none";
 
-hmRefreshAssessment().catch((err) => {
-  error.textContent = err.message || "Failed to load assessment.";
-});
+  try {
+    await loadAssessment();
+  } catch (err) {
+    error.style.display = "block";
+    error.textContent = err.message || "Failed to initialize scenario plotter.";
+  } finally {
+    loader.style.display = "none";
+  }
+}
 
-
-
-    loadAssessment();
+hmInit();
   </script>
 </body>
 </html>

@@ -1,10 +1,68 @@
 import Parser from "rss-parser";
 import OpenAI from "openai";
-import url from "url";
+import fs from "fs/promises";
+import path from "path";
+import url, { fileURLToPath } from "url";
 import { getMergedSavedSources } from "../lib/source-store.js";
 import { discoverFeedFromWebsite } from "../lib/feed-discovery.js";
 
 const parser = new Parser();
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const HISTORY_DIR = path.join(__dirname, "../data");
+const HISTORY_FILE = path.join(HISTORY_DIR, "assessment-history.json");
+
+async function loadAssessmentHistory(topic) {
+  try {
+    const contents = await fs.readFile(HISTORY_FILE, "utf8");
+    const parsed = JSON.parse(contents || "{}");
+    const history = Array.isArray(parsed[topic]) ? parsed[topic] : [];
+    return history;
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    console.error("Failed to load assessment history:", error.message);
+    return [];
+  }
+}
+
+async function saveAssessmentHistory(topic, entry) {
+  await fs.mkdir(HISTORY_DIR, { recursive: true });
+  let contents = {};
+
+  try {
+    const raw = await fs.readFile(HISTORY_FILE, "utf8");
+    contents = JSON.parse(raw || "{}") || {};
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error("Failed to read assessment history file:", error.message);
+    }
+  }
+
+  const topicHistory = Array.isArray(contents[topic]) ? contents[topic] : [];
+  const entryDate = String(entry.date || new Date().toISOString().slice(0, 10));
+  const existingIndex = topicHistory.findIndex((item) => item.date === entryDate);
+
+  const mergedEntry = {
+    ...entry,
+    date: entryDate,
+    updated_at: entry.updated_at || new Date().toISOString()
+  };
+
+  if (existingIndex >= 0) {
+    topicHistory[existingIndex] = {
+      ...topicHistory[existingIndex],
+      ...mergedEntry
+    };
+  } else {
+    topicHistory.push(mergedEntry);
+  }
+
+  topicHistory.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  contents[topic] = topicHistory;
+
+  await fs.writeFile(HISTORY_FILE, JSON.stringify(contents, null, 2), "utf8");
+  return topicHistory;
+}
 
 // Monkey-patch url.parse to use WHATWG URL API to avoid deprecation warning
 const originalParse = url.parse;
@@ -1177,6 +1235,49 @@ export default async function handler(req, res) {
     const assessment = await generateScenarioAssessment(topicConfig, articles, externalSignals);
     endTimer(assessmentTimer);
 
+const nowIso = new Date().toISOString();
+const today = nowIso.slice(0, 10);
+const topArticle = articles[0] || null;
+
+const uniqueUsedSources = Array.from(
+  new Map(
+    articles.map((article) => [
+      String(article.source || "").trim().toLowerCase(),
+      {
+        name: article.source,
+        url: article.url
+      }
+    ])
+  ).values()
+).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+const shortSummary = String(assessment.summary || "")
+  .replace(/\s+/g, " ")
+  .trim()
+  .slice(0, 180);
+
+const historyEntry = {
+  date: today,
+  updated_at: nowIso,
+  summary: assessment.summary,
+  short_summary: shortSummary,
+  top_headline: topArticle ? `${topArticle.source}: ${topArticle.title}` : "No headline available.",
+  top_headline_url: topArticle?.url || null,
+  used_sources: uniqueUsedSources,
+  article_count: articles.length,
+  scenario_scores: assessment.scenarios.map((item) => ({
+    name: item.name,
+    score: Number(item.score || 0)
+  }))
+};
+
+    let history = [];
+    try {
+      history = await saveAssessmentHistory(topic, historyEntry);
+    } catch (error) {
+      console.error("Unable to save assessment history:", error.message);
+    }
+
     endTimer(totalTimer);
 
     return json(res, 200, {
@@ -1186,6 +1287,7 @@ export default async function handler(req, res) {
       scenarios: assessment.scenarios,
       signals: assessment.signals,
       calculation: assessment.calculation,
+      history: Array.isArray(history) ? history.slice(-14) : [],
       sources: [
         ...articles.map((article) => ({
           title: `${article.source}: ${article.title}`,
