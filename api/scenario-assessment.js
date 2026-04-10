@@ -19,7 +19,7 @@ function getHistoryBlobPath(topic) {
 async function readJsonFromBlobUrl(url) {
   const response = await fetch(url, {
     headers: {
-      Accept: "application/json"
+      Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`
     }
   });
 
@@ -83,16 +83,15 @@ async function saveAssessmentHistory(topic, entry) {
 
     existing.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
-    await put(
-      pathname,
-      JSON.stringify(existing, null, 2),
-      {
-        access: "public",
-        addRandomSuffix: false,
-        contentType: "application/json",
-        allowOverwrite: true
-      }
-    );
+await put(
+  pathname,
+  JSON.stringify(existing, null, 2),
+  {
+    addRandomSuffix: false,
+    contentType: "application/json",
+    allowOverwrite: true
+  }
+);
 
     return existing;
   } catch (error) {
