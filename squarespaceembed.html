@@ -1307,20 +1307,11 @@ function renderCalculation(calculation) {
       <div class="hm-calc-meta">
         AI score: ${scenario.ai_score} | Market boost: ${scenario.market_boost} | Final score: ${scenario.final_score}%
       </div>
-
-      ${(scenario.reasoning || []).map((reason) => `
+      ${scenario.reasoning ? `
         <div class="hm-calc-reason">
-          <div class="hm-calc-signal">${reason.signal}</div>
-          <div class="hm-calc-effect">${reason.effect} (${reason.weight})</div>
-          <div class="hm-calc-sources">
-            ${(reason.sources || []).map((src) => `
-              <a class="hm-calc-source" href="${src.url}" target="_blank" rel="noopener noreferrer">
-                ${src.source}: ${src.title}
-              </a>
-            `).join("")}
-          </div>
+          <div class="hm-calc-reasoning">${scenario.reasoning}</div>
         </div>
-      `).join("")}
+      ` : ""}
     </div>
   `).join("");
 }
