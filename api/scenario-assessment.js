@@ -22,7 +22,7 @@ const parser = new Parser();
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const RSS_FETCH_TIMEOUT_MS        = 8000;
+const RSS_FETCH_TIMEOUT_MS        = 3500;
 const JSON_FETCH_TIMEOUT_MS       = 8000;
 const OPENAI_TIMEOUT_FALLBACK_MS  = 45000;
 const MAX_ITEMS_PER_FEED          = 8;   // was 6
@@ -273,7 +273,11 @@ async function loadAssessmentHistory(topic) {
       ? result.blobs.find((item) => item.pathname === pathname)
       : null;
     if (!blob?.url) return [];
-    const history = await readJsonFromBlobUrl(blob.url);
+    history = await loadAssessmentHistory(topic);
+
+    saveAssessmentHistory(topic, historyEntry).catch((error) => {
+      console.error("Unable to save assessment history:", error.message);
+    });
     if (!Array.isArray(history)) return [];
     return history
       .filter((item) => item && item.date && Array.isArray(item.scenario_scores))
@@ -635,6 +639,11 @@ async function collectTopicCoverage(topicConfig, savedSources = []) {
     (source) =>
       String(source.type || "rss").toLowerCase() === "rss" &&
       !isBlockedOrBrokenSource(source, source.isUserAdded)
+  );
+
+  const liveRssSources = rssSources.slice(0, 8);
+  const itemGroups = await Promise.all(
+    liveRssSources.map((source) => fetchRssItems(source, topicConfig.keywordFilter))
   );
 
   console.log("RSS SOURCES:", rssSources.map((s) => `${s.name}${s.isUserAdded ? " [user]" : ""}`));
