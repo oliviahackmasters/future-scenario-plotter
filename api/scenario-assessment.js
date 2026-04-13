@@ -14,7 +14,11 @@
 
 import Parser from "rss-parser";
 import OpenAI from "openai";
-import { put, list } from "@vercel/blob";
+import {
+  loadAssessmentHistory,
+  saveAssessmentHistory,
+  saveLatestAssessment
+} from "../lib/blob-store.js";
 import { getMergedSavedSources } from "../lib/source-store.js";
 import { discoverFeedFromWebsite } from "../lib/feed-discovery.js";
 
@@ -269,16 +273,19 @@ async function loadAssessmentHistory(topic) {
   try {
     const pathname = getHistoryBlobPath(topic);
     const result = await list({ prefix: pathname, limit: 10 });
+
     const blob = Array.isArray(result?.blobs)
       ? result.blobs.find((item) => item.pathname === pathname)
       : null;
+
     if (!blob?.url) return [];
+
     history = await loadAssessmentHistory(topic);
 
     saveAssessmentHistory(topic, historyEntry).catch((error) => {
       console.error("Unable to save assessment history:", error.message);
     });
-    if (!Array.isArray(history)) return [];
+
     return history
       .filter((item) => item && item.date && Array.isArray(item.scenario_scores))
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -641,19 +648,15 @@ async function collectTopicCoverage(topicConfig, savedSources = []) {
       !isBlockedOrBrokenSource(source, source.isUserAdded)
   );
 
-  const liveRssSources = rssSources.slice(0, 8);
-  const itemGroups = await Promise.all(
-    liveRssSources.map((source) => fetchRssItems(source, topicConfig.keywordFilter))
-  );
 
   console.log("RSS SOURCES:", rssSources.map((s) => `${s.name}${s.isUserAdded ? " [user]" : ""}`));
 
   // Fetch all three data sources in parallel
-  const [rssGroups, newsApiItems, worldMonitorItems] = await Promise.all([
-    Promise.all(rssSources.map((source) => fetchRssItems(source, topicConfig))),
-    fetchNewsApiArticles(topicConfig),
-    fetchWorldMonitorArticles(topicConfig)
-  ]);
+const [rssGroups, newsApiItems, worldMonitorItems] = await Promise.all([
+  Promise.all(liveRssSources.map((source) => fetchRssItems(source, topicConfig))),
+  fetchNewsApiArticles(topicConfig),
+  fetchWorldMonitorArticles(topicConfig)
+]);
 
   const rssItems   = rssGroups.flat();
   const flattened  = [...rssItems, ...newsApiItems, ...worldMonitorItems];

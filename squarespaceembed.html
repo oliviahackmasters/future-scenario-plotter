@@ -1008,6 +1008,10 @@
       window.HM_SCENARIO_API_URL ||
       "https://future-scenario-predictor.vercel.app/api/scenario-assessment?topic=iran";
 
+    const LATEST_API_URL =
+    window.HM_SCENARIO_LATEST_API_URL ||
+    "https://future-scenario-predictor.vercel.app/api/scenario-latest?topic=iran";
+
     const SOURCES_API_URL =
       window.HM_SOURCES_API_URL ||
       "https://future-scenario-predictor.vercel.app/api/sources?topic=iran";
@@ -1572,17 +1576,26 @@ async function hmRefreshAssessment() {
   loader.style.display = "block";
   error.style.display = "none";
   error.textContent = "";
+  status.textContent = "Refreshing assessment";
+  status.classList.remove("is-error");
 
   try {
-    const data = await hmFetchJson(API_URL);
-    render(data);
-    status.textContent = `Updated ${relativeTime(data.updated_at || new Date().toISOString())}`;
-    status.classList.remove("is-error");
+    const res = await fetch(API_URL, {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.message || `Refresh failed with status ${res.status}`);
+    }
+
+    await loadAssessment();
   } catch (err) {
-    render(fallbackData);
     error.style.display = "block";
-    error.textContent = `Live API unavailable. Showing fallback demo data. ${err.message || "Failed to refresh assessment."}`;
-    status.textContent = "Fallback demo mode";
+    error.textContent = err.message || "Failed to refresh assessment.";
+    status.textContent = "Refresh failed";
     status.classList.add("is-error");
   } finally {
     loader.style.display = "none";
@@ -1746,32 +1759,36 @@ const calcPanel = document.getElementById("hmCalcPanel");
     }
 
     async function loadAssessment() {
-      loader.style.display = "block";
-      error.style.display = "none";
-      status.textContent = "Refreshing assessment";
-      status.classList.remove("is-error");
+  loader.style.display = "block";
+  error.style.display = "none";
+  error.textContent = "";
+  status.textContent = "Loading latest assessment";
+  status.classList.remove("is-error");
 
-      try {
-        const res = await fetch(API_URL, {
-          method: "GET",
-          headers: { "Accept": "application/json" }
-        });
+  try {
+    const res = await fetch(LATEST_API_URL, {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
 
-        if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-        const data = await res.json();
-        render(data);
-      } catch (err) {
-        render(fallbackData);
-        error.style.display = "block";
-        error.textContent = `Live API unavailable. Showing fallback demo data. ${err.message}`;
-        status.textContent = "Fallback demo mode";
-        status.classList.add("is-error");
-      } finally {
-        loader.style.display = "none";
-      }
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.message || `Request failed with status ${res.status}`);
     }
 
-    refreshBtn.addEventListener("click", loadAssessment);
+    render(data);
+  } catch (err) {
+    error.style.display = "block";
+    error.textContent = err.message || "Failed to load cached assessment.";
+    status.textContent = "No cached assessment available";
+    status.classList.add("is-error");
+  } finally {
+    loader.style.display = "none";
+  }
+}
+
+    refreshBtn.addEventListener("click", hmRefreshAssessment);
     sourcesBtn.addEventListener("click", () => {
       const hidden = sources.style.display === "none";
       sources.style.display = hidden ? "grid" : "none";
