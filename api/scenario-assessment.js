@@ -28,7 +28,7 @@ const parser = new Parser();
 
 const RSS_FETCH_TIMEOUT_MS        = 3500;
 const JSON_FETCH_TIMEOUT_MS       = 8000;
-const OPENAI_TIMEOUT_FALLBACK_MS  = 45000;
+const OPENAI_TIMEOUT_FALLBACK_MS  = 15000;
 const MAX_ITEMS_PER_FEED          = 8;   // was 6
 const MAX_ARTICLES_FOR_MODEL      = 5;   // was 3
 const MAX_FILTERED_ITEMS          = 8;   // was 5
@@ -257,69 +257,69 @@ export function listAvailableTopics() {
 
 // ── History (Blob) ─────────────────────────────────────────────────────────────
 
-function getHistoryBlobPath(topic) {
-  return `history/${String(topic || "iran").toLowerCase()}.json`;
-}
+// function getHistoryBlobPath(topic) {
+//   return `history/${String(topic || "iran").toLowerCase()}.json`;
+// }
 
-async function readJsonFromBlobUrl(url) {
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }
-  });
-  if (!response.ok) throw new Error(`Failed to fetch blob JSON (${response.status})`);
-  return await response.json();
-}
+// async function readJsonFromBlobUrl(url) {
+//   const response = await fetch(url, {
+//     headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }
+//   });
+//   if (!response.ok) throw new Error(`Failed to fetch blob JSON (${response.status})`);
+//   return await response.json();
+// }
 
-async function loadAssessmentHistory(topic) {
-  try {
-    const pathname = getHistoryBlobPath(topic);
-    const result = await list({ prefix: pathname, limit: 10 });
+// async function loadAssessmentHistory(topic) {
+//   try {
+//     const pathname = getHistoryBlobPath(topic);
+//     const result = await list({ prefix: pathname, limit: 10 });
 
-    const blob = Array.isArray(result?.blobs)
-      ? result.blobs.find((item) => item.pathname === pathname)
-      : null;
+//     const blob = Array.isArray(result?.blobs)
+//       ? result.blobs.find((item) => item.pathname === pathname)
+//       : null;
 
-    if (!blob?.url) return [];
+//     if (!blob?.url) return [];
 
-    history = await loadAssessmentHistory(topic);
+//     history = await loadAssessmentHistory(topic);
 
-    saveAssessmentHistory(topic, historyEntry).catch((error) => {
-      console.error("Unable to save assessment history:", error.message);
-    });
+//     saveAssessmentHistory(topic, historyEntry).catch((error) => {
+//       console.error("Unable to save assessment history:", error.message);
+//     });
 
-    return history
-      .filter((item) => item && item.date && Array.isArray(item.scenario_scores))
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  } catch (error) {
-    console.error("Failed to load assessment history from Blob:", error.message);
-    return [];
-  }
-}
+//     return history
+//       .filter((item) => item && item.date && Array.isArray(item.scenario_scores))
+//       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+//   } catch (error) {
+//     console.error("Failed to load assessment history from Blob:", error.message);
+//     return [];
+//   }
+// }
 
-async function saveAssessmentHistory(topic, entry) {
-  try {
-    const pathname = getHistoryBlobPath(topic);
-    const existing = await loadAssessmentHistory(topic);
-    const entryDate = String(entry.date || new Date().toISOString().slice(0, 10));
-    const mergedEntry = { ...entry, date: entryDate, updated_at: entry.updated_at || new Date().toISOString() };
-    const existingIndex = existing.findIndex((item) => item.date === entryDate);
-    if (existingIndex >= 0) {
-      existing[existingIndex] = { ...existing[existingIndex], ...mergedEntry };
-    } else {
-      existing.push(mergedEntry);
-    }
-    existing.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    await put(pathname, JSON.stringify(existing, null, 2), {
-      access: "public",
-      addRandomSuffix: false,
-      contentType: "application/json",
-      allowOverwrite: true
-    });
-    return existing;
-  } catch (error) {
-    console.error("Failed to save assessment history to Blob:", error.message);
-    throw error;
-  }
-}
+// async function saveAssessmentHistory(topic, entry) {
+//   try {
+//     const pathname = getHistoryBlobPath(topic);
+//     const existing = await loadAssessmentHistory(topic);
+//     const entryDate = String(entry.date || new Date().toISOString().slice(0, 10));
+//     const mergedEntry = { ...entry, date: entryDate, updated_at: entry.updated_at || new Date().toISOString() };
+//     const existingIndex = existing.findIndex((item) => item.date === entryDate);
+//     if (existingIndex >= 0) {
+//       existing[existingIndex] = { ...existing[existingIndex], ...mergedEntry };
+//     } else {
+//       existing.push(mergedEntry);
+//     }
+//     existing.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+//     await put(pathname, JSON.stringify(existing, null, 2), {
+//       access: "public",
+//       addRandomSuffix: false,
+//       contentType: "application/json",
+//       allowOverwrite: true
+//     });
+//     return existing;
+//   } catch (error) {
+//     console.error("Failed to save assessment history to Blob:", error.message);
+//     throw error;
+//   }
+// }
 
 // ── OpenAI ─────────────────────────────────────────────────────────────────────
 
@@ -642,16 +642,16 @@ async function collectTopicCoverage(topicConfig, savedSources = []) {
     ).values()
   ).filter((source) => source.url);
 
-  const rssSources = uniqueSources.filter(
-    (source) =>
-      String(source.type || "rss").toLowerCase() === "rss" &&
-      !isBlockedOrBrokenSource(source, source.isUserAdded)
-  );
+const rssSources = uniqueSources.filter(
+  (source) =>
+    String(source.type || "rss").toLowerCase() === "rss" &&
+    !isBlockedOrBrokenSource(source, source.isUserAdded)
+);
 
+const liveRssSources = rssSources.slice(0, 5);
 
-  console.log("RSS SOURCES:", rssSources.map((s) => `${s.name}${s.isUserAdded ? " [user]" : ""}`));
+console.log("RSS SOURCES:", rssSources.map((s) => `${s.name}${s.isUserAdded ? " [user]" : ""}`));
 
-  // Fetch all three data sources in parallel
 const [rssGroups, newsApiItems, worldMonitorItems] = await Promise.all([
   Promise.all(liveRssSources.map((source) => fetchRssItems(source, topicConfig))),
   fetchNewsApiArticles(topicConfig),
@@ -1103,37 +1103,50 @@ export default async function handler(req, res) {
       scenario_scores: assessment.scenarios.map((item) => ({ name: item.name, score: Number(item.score || 0) }))
     };
 
-    let history = [];
-    try {
-      history = await saveAssessmentHistory(topic, historyEntry);
-      if (!Array.isArray(history) || !history.length) history = await loadAssessmentHistory(topic);
-    } catch (error) {
-      console.error("Unable to save assessment history:", error.message);
-      history = await loadAssessmentHistory(topic);
-    }
+let history = [];
+const responsePayload = {
+  topic: topicConfig.label,
+  updated_at: new Date().toISOString(),
+  summary: assessment.summary,
+  scenarios: assessment.scenarios,
+  signals: assessment.signals,
+  calculation: assessment.calculation,
+  history: [],
+  available_topics: listAvailableTopics(),
+  sources: [
+    ...articles.map((a) => ({ title: `${a.source}: ${a.title}`, url: a.url })),
+    { title: "Polymarket live markets", url: "https://polymarket.com/" }
+  ],
+  meta: {
+    oil: oilSignal,
+    polymarket: {
+      source: polymarketSignal.source,
+      matchedMarkets: polymarketSignal.matchedMarkets
+    },
+    saved_sources: savedSources,
+    used_article_sources: [...new Set(articles.map((a) => a.source))]
+  }
+};
 
-    endTimer(totalTimer);
+try {
+  await saveLatestAssessment(topic, responsePayload);
+} catch (error) {
+  console.error("Unable to save latest assessment:", error.message);
+}
 
-    return json(res, 200, {
-      topic: topicConfig.label,
-      updated_at: new Date().toISOString(),
-      summary: assessment.summary,
-      scenarios: assessment.scenarios,
-      signals: assessment.signals,
-      calculation: assessment.calculation,
-      history: Array.isArray(history) ? history.slice(-30) : [],
-      available_topics: listAvailableTopics(),
-      sources: [
-        ...articles.map((a) => ({ title: `${a.source}: ${a.title}`, url: a.url })),
-        { title: "Polymarket live markets", url: "https://polymarket.com/" }
-      ],
-      meta: {
-        oil: oilSignal,
-        polymarket: { source: polymarketSignal.source, matchedMarkets: polymarketSignal.matchedMarkets },
-        saved_sources: savedSources,
-        used_article_sources: [...new Set(articles.map((a) => a.source))]
-      }
-    });
+try {
+  history = await saveAssessmentHistory(topic, historyEntry);
+} catch (error) {
+  console.error("Unable to save assessment history:", error.message);
+  history = await loadAssessmentHistory(topic);
+}
+
+responsePayload.history = Array.isArray(history) ? history.slice(-30) : [];
+
+endTimer(totalTimer);
+return json(res, 200, responsePayload);
+
+
   } catch (error) {
     console.error("Scenario assessment failed:", error);
     return json(res, 500, { error: "scenario_assessment_failed", message: error.message });
