@@ -42,6 +42,7 @@ const TOPICS = {
   iran: {
     label: "Iran",
     newsApiQuery: "Iran OR Hormuz OR Tehran OR IRGC OR Gulf",
+    preferredPolymarketQuestion: "Iran x Israel/US conflict ends by...?",
     scenarios: [
       {
         name: "Chaos + Collapse",
@@ -444,6 +445,91 @@ async function callOpenAIJsonWithRetry({
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
+
+function normalizeQuestion(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^\w\s/?-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function questionsMatch(a, b) {
+  const na = normalizeQuestion(a);
+  const nb = normalizeQuestion(b);
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+function mapPreferredIranEndDateMarketToScenarios(market, scenarioNames) {
+  const weights = new Map(scenarioNames.map((name) => [name, 0]));
+  const matchedMarkets = [];
+
+  const outcomes = Array.isArray(market.outcomes)
+    ? market.outcomes
+    : typeof market.outcomes === "string"
+      ? (() => {
+          try { return JSON.parse(market.outcomes || "[]"); } catch { return []; }
+        })()
+      : [];
+
+  const outcomePrices = Array.isArray(market.outcomePrices)
+    ? market.outcomePrices
+    : typeof market.outcomePrices === "string"
+      ? (() => {
+          try { return JSON.parse(market.outcomePrices || "[]"); } catch { return []; }
+        })()
+      : [];
+
+  for (let i = 0; i < outcomes.length; i += 1) {
+    const outcomeLabel = String(outcomes[i] || "").trim();
+    const price = Number(outcomePrices[i] || 0);
+
+    if (!outcomeLabel || !Number.isFinite(price) || price <= 0) continue;
+
+    const label = outcomeLabel.toLowerCase();
+
+    // Earlier end dates -> more like Cold Containment / Shattered Diplomacy
+    if (label.includes("apr 7") || label.includes("april 7") || label.includes("apr 15") || label.includes("april 15")) {
+      if (weights.has("Cold Containment")) {
+        weights.set("Cold Containment", weights.get("Cold Containment") + price * 0.7);
+      }
+      if (weights.has("Shattered Diplomacy")) {
+        weights.set("Shattered Diplomacy", weights.get("Shattered Diplomacy") + price * 0.3);
+      }
+    }
+
+    // Medium duration -> mixed containment / burning strait
+    else if (label.includes("apr 30") || label.includes("april 30") || label.includes("may 15")) {
+      if (weights.has("Cold Containment")) {
+        weights.set("Cold Containment", weights.get("Cold Containment") + price * 0.35);
+      }
+      if (weights.has("Burning Strait")) {
+        weights.set("Burning Strait", weights.get("Burning Strait") + price * 0.65);
+      }
+    }
+
+    // Long duration -> more like Burning Strait / Chaos + Collapse tail risk
+    else if (label.includes("jun 30") || label.includes("june 30") || label.includes("december 31") || label.includes("dec 31")) {
+      if (weights.has("Burning Strait")) {
+        weights.set("Burning Strait", weights.get("Burning Strait") + price * 0.75);
+      }
+      if (weights.has("Chaos + Collapse")) {
+        weights.set("Chaos + Collapse", weights.get("Chaos + Collapse") + price * 0.25);
+      }
+    }
+
+    matchedMarkets.push({
+      question: market.question,
+      outcome: outcomeLabel,
+      price
+    });
+  }
+
+  return {
+    weights: Object.fromEntries(weights),
+    matchedMarkets
+  };
+}
 
 function normalizeWhitespace(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -874,6 +960,44 @@ async function fetchPolymarketSignal(topicConfig) {
     const active = Array.isArray(markets) ? markets : [];
     const scenarioNames = topicConfig.scenarios.map((s) => s.name);
 
+    // 1. First try exact/preferred market match
+    const preferredQuestion = String(topicConfig.preferredPolymarketQuestion || "").trim();
+
+    if (preferredQuestion) {
+      const exactMarket = active.find((m) => {
+        if (!m?.active || m?.closed) return false;
+        return questionsMatch(m.question, preferredQuestion);
+      });
+
+      if (exactMarket) {
+        const mapped = mapPreferredIranEndDateMarketToScenarios(exactMarket, scenarioNames);
+        const topScenario = Object.entries(mapped.weights).sort((a, b) => b[1] - a[1])[0];
+
+        return {
+          source: "Polymarket",
+          status: "ok",
+          weights: mapped.weights,
+          matchedMarkets: mapped.matchedMarkets,
+          signal: {
+            name: "prediction market odds",
+            reading: mapped.matchedMarkets.length
+              ? `Polymarket's preferred Iran conflict market leans toward ${topScenario?.[0] || "Cold Containment"}.`
+              : "Preferred Polymarket market found but yielded no usable priced outcomes.",
+            direction: mapped.matchedMarkets.length ? "escalatory" : "neutral",
+            confidence: mapped.matchedMarkets.length >= 3 ? "Medium" : "Low",
+            sources: mapped.matchedMarkets.length
+              ? [{
+                  title: exactMarket.question,
+                  url: `https://polymarket.com/`,
+                  source: "Polymarket"
+                }]
+              : []
+          }
+        };
+      }
+    }
+
+    // 2. Fallback to broad search
     const filtered = active
       .filter((m) => m.active && !m.closed)
       .filter((m) => {
@@ -893,10 +1017,15 @@ async function fetchPolymarketSignal(topicConfig) {
       }
 
       const yesPrice = Number(outcomePrices[0] || 0);
-      const mapped   = scorePolymarketScenario(market.question, yesPrice, scenarioNames);
+      const mapped = scorePolymarketScenario(market.question, yesPrice, scenarioNames);
+
       if (mapped && weights.has(mapped.scenario)) {
         weights.set(mapped.scenario, weights.get(mapped.scenario) + mapped.weight);
-        matchedMarkets.push({ question: market.question, scenario: mapped.scenario, yesPrice });
+        matchedMarkets.push({
+          question: market.question,
+          scenario: mapped.scenario,
+          yesPrice
+        });
       }
     }
 
@@ -906,21 +1035,38 @@ async function fetchPolymarketSignal(topicConfig) {
       : "No strongly matched Polymarket markets found for this topic.";
 
     return {
-      source: "Polymarket", status: "ok",
+      source: "Polymarket",
+      status: "ok",
       weights: Object.fromEntries(weights),
       matchedMarkets,
       signal: {
-        name: "prediction market odds", reading,
+        name: "prediction market odds",
+        reading,
         direction: matchedMarkets.length ? "escalatory" : "neutral",
         confidence: matchedMarkets.length >= 3 ? "Medium" : "Low",
-        sources: []
+        sources: matchedMarkets.length
+          ? [{
+              title: preferredQuestion || "Polymarket live markets",
+              url: "https://polymarket.com/",
+              source: "Polymarket"
+            }]
+          : []
       }
     };
   } catch (error) {
     console.error("Polymarket fetch failed:", error.message);
     return {
-      source: "Polymarket", status: "error", weights: {}, matchedMarkets: [],
-      signal: { name: "prediction market odds", reading: `Prediction market feed unavailable: ${error.message}`, direction: "neutral", confidence: "Low", sources: [] }
+      source: "Polymarket",
+      status: "error",
+      weights: {},
+      matchedMarkets: [],
+      signal: {
+        name: "prediction market odds",
+        reading: `Prediction market feed unavailable: ${error.message}`,
+        direction: "neutral",
+        confidence: "Low",
+        sources: []
+      }
     };
   }
 }
@@ -1345,8 +1491,11 @@ const responsePayload = {
   sources: [
   ...citedSources,
   ...(Array.isArray(polymarketSignal?.matchedMarkets) && polymarketSignal.matchedMarkets.length
-    ? [{ title: "Polymarket live markets", url: "https://polymarket.com/" }]
-    : [])
+  ? [{
+      title: topicConfig.preferredPolymarketQuestion || "Polymarket live markets",
+      url: "https://polymarket.com/",
+    }]
+  : [])
 ],
   meta: {
     oil: oilSignal,
