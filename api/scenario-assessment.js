@@ -1104,6 +1104,17 @@ export default async function handler(req, res) {
     };
 
 let history = [];
+const citedSources = Array.from(
+  new Map(
+    (assessment.signals || [])
+      .flatMap((s) => Array.isArray(s.sources) ? s.sources : [])
+      .map((s) => [
+        String(s.url || "").trim(),
+        { title: `${s.source}: ${s.title}`, url: s.url }
+      ])
+  ).values()
+);
+
 const responsePayload = {
   topic: topicConfig.label,
   updated_at: new Date().toISOString(),
@@ -1114,7 +1125,7 @@ const responsePayload = {
   history: [],
   available_topics: listAvailableTopics(),
   sources: [
-    ...articles.map((a) => ({ title: `${a.source}: ${a.title}`, url: a.url })),
+    ...citedSources,
     { title: "Polymarket live markets", url: "https://polymarket.com/" }
   ],
   meta: {
@@ -1127,6 +1138,7 @@ const responsePayload = {
     used_article_sources: [...new Set(articles.map((a) => a.source))]
   }
 };
+
 
 try {
   await saveLatestAssessment(topic, responsePayload);
