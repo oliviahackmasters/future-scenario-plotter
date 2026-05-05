@@ -6,137 +6,241 @@
   <title>Custom Scenario Plotter</title>
   <style>
     :root {
-      --bg: #050505;
-      --panel: #0d0d0d;
-      --orange: #f09632;
-      --orange-dark: #c26900;
-      --orange-soft: #f6b66d;
-      --cream: #f8ca98;
-      --text: #f4a33e;
-      --muted: #b46f24;
-      --black: #050505;
+      --bg: #020202;
+      --panel: #070707;
+      --panel-warm: #180d08;
+      --orange: #d46f2d;
+      --orange-bright: #e08a53;
+      --orange-fill: #dc8756;
+      --text: #f1f1f1;
+      --muted: #8f8f8f;
+      --line: #a45422;
+      --disabled: #252525;
     }
     * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font: 16px/1.45 Arial, Helvetica, sans-serif;
+      font: 14px/1.45 Arial, Helvetica, sans-serif;
+      letter-spacing: .01em;
     }
     .fsp-widget {
       width: 100%;
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 18px;
+      max-width: 1230px;
+      margin: 14px auto;
+      padding: 19px;
       background: var(--bg);
+      border: 1px solid var(--line);
     }
-    .grid { display: grid; gap: 10px 18px; }
-    .scenario-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 92px; align-items: stretch; }
-    .scenario-row { display: contents; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .brand {
+      border: 1px solid var(--orange);
+      color: var(--orange-bright);
+      padding: 8px 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .title {
+      font-weight: 800;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      font-size: 16px;
+    }
+    .intro {
+      color: #d7d7d7;
+      margin: 2px 0 14px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .button-row { display: flex; flex-wrap: wrap; gap: 9px; }
+    .done { color: #d7d7d7; text-transform: uppercase; letter-spacing: .12em; }
     input, textarea, button {
       font: inherit;
       border-radius: 0;
     }
     input, textarea {
       width: 100%;
-      background: var(--black);
+      background: var(--bg);
       color: var(--text);
-      border: 1px solid var(--orange);
+      border: 1px solid var(--line);
       outline: none;
-      padding: 7px 10px;
-      min-height: 33px;
+      padding: 12px 14px;
+      min-height: 48px;
+      font-size: 15px;
     }
-    textarea { min-height: 34px; resize: vertical; }
-    input::placeholder, textarea::placeholder { color: var(--text); opacity: 0.95; }
+    textarea { resize: vertical; min-height: 48px; }
+    input::placeholder, textarea::placeholder { color: #8c8c8c; opacity: 1; text-transform: uppercase; }
     button {
       cursor: pointer;
       border: 1px solid var(--orange);
-      background: var(--orange);
-      color: #080808;
-      padding: 8px 12px;
-      min-height: 33px;
+      background: var(--bg);
+      color: var(--text);
+      padding: 13px 16px;
+      min-height: 47px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      text-transform: uppercase;
     }
-    button:hover { filter: brightness(1.07); }
+    button:hover { background: #120905; }
     button:disabled { opacity: 0.55; cursor: wait; }
+    .primary { background: var(--orange-fill); color: #0c0c0c; border-color: var(--orange-fill); }
+    .primary:hover { filter: brightness(1.05); background: var(--orange-fill); }
+    .tabs { border-bottom: 1px solid var(--line); padding-bottom: 15px; margin-bottom: 15px; }
+    .tab.active { background: var(--orange-fill); color: #0b0b0b; }
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) 118px;
+      gap: 10px;
+      align-items: stretch;
+      padding-bottom: 15px;
+      border-bottom: 1px solid var(--line);
+    }
+    .scenario-row { display: contents; }
     .go {
       grid-column: 3;
       grid-row: 1 / span 4;
-      min-height: 152px;
-      font-size: 18px;
+      min-height: 224px;
+      font-size: 13px;
     }
     .results {
-      margin-top: 48px;
+      margin-top: 15px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid var(--line);
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px 22px;
+      gap: 10px;
     }
     .result-card {
-      min-height: 76px;
-      border: 1px solid var(--orange);
+      min-height: 82px;
+      border: 1px solid var(--line);
+      background: var(--panel);
       display: flex;
       align-items: center;
       justify-content: center;
       text-align: center;
-      color: #090909;
-      padding: 12px;
+      color: var(--text);
+      padding: 14px;
     }
-    .result-card:nth-child(1) { background: var(--orange-dark); }
-    .result-card:nth-child(2) { background: var(--orange-soft); }
-    .result-card:nth-child(3) { background: #814300; color: var(--text); }
-    .result-card:nth-child(4) { background: var(--cream); }
+    .result-card:nth-child(2n) { background: #120906; }
+    .result-card strong { color: var(--orange-bright); text-transform: uppercase; letter-spacing: .06em; }
     .sources {
-      margin-top: 52px;
+      margin-top: 15px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid var(--line);
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 180px;
-      gap: 11px 8px;
+      grid-template-columns: minmax(0, 1fr) 136px;
+      gap: 10px;
       align-items: stretch;
     }
-    .sources-title, .source-line {
-      border: 1px solid var(--orange);
-      background: var(--black);
-      min-height: 39px;
+    .section-label {
+      color: var(--orange-bright);
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      align-self: center;
+    }
+    .sources-title {
+      grid-column: 1 / -1;
+      min-height: 48px;
       display: flex;
       align-items: center;
-      justify-content: center;
-      text-align: center;
-      padding: 8px 10px;
+      justify-content: space-between;
+      border: 1px solid var(--line);
+      padding: 11px 14px;
+      background: var(--panel);
     }
-    .sources-title { grid-column: 1 / 2; }
+    .source-line {
+      border: 1px solid var(--line);
+      background: var(--bg);
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      padding: 11px 14px;
+      color: #dcdcdc;
+    }
     .source-toggle {
-      background: var(--orange);
-      color: #080808;
+      background: var(--bg);
+      color: var(--text);
       border: 1px solid var(--orange);
-      min-height: 39px;
+      min-height: 48px;
+      font-size: 12px;
     }
-    .source-toggle.off { background: #222; color: var(--text); }
+    .source-toggle.off { background: var(--disabled); color: #8b8b8b; border-color: #6d391c; }
+    .source-editor {
+      margin-top: 15px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid var(--line);
+    }
+    .source-editor summary {
+      cursor: pointer;
+      color: var(--orange-bright);
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      list-style: none;
+    }
+    .source-editor summary::-webkit-details-marker { display: none; }
+    .source-editor-grid { margin-top: 12px; display: grid; grid-template-columns: 1fr 2fr 90px auto; gap: 10px; }
     .status, .evidence {
-      margin-top: 18px;
-      color: var(--cream);
+      margin-top: 15px;
+      color: #dcdcdc;
       font-size: 14px;
     }
-    .evidence a { color: var(--orange-soft); }
-    .source-editor {
-      margin-top: 18px;
-      border: 1px solid rgba(240,150,50,.55);
-      padding: 12px;
+    .evidence {
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      background: var(--panel);
     }
-    .source-editor summary { cursor: pointer; color: var(--cream); }
-    .source-editor-grid { margin-top: 10px; display: grid; grid-template-columns: 1fr 2fr 90px auto; gap: 8px; }
-    .small { font-size: 13px; color: var(--muted); }
+    .evidence:empty { display: none; }
+    .evidence a { color: var(--text); }
+    .small { font-size: 12px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
     @media (max-width: 720px) {
+      .fsp-widget { margin: 0; border-left: 0; border-right: 0; padding: 14px; }
+      .toolbar { align-items: flex-start; }
       .scenario-grid { grid-template-columns: 1fr; }
       .scenario-row { display: grid; gap: 8px; }
-      .go { grid-column: auto; grid-row: auto; min-height: 44px; }
-      .results { grid-template-columns: 1fr; margin-top: 26px; }
-      .sources { grid-template-columns: 1fr; margin-top: 28px; }
-      .sources-title { grid-column: auto; }
+      .go { grid-column: auto; grid-row: auto; min-height: 48px; }
+      .results { grid-template-columns: 1fr; }
+      .sources { grid-template-columns: 1fr; }
       .source-editor-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="fsp-widget" id="fsp-widget">
-    <div class="grid scenario-grid" id="scenario-grid"></div>
+    <div class="topbar">
+      <div class="brand">Hackmasters</div>
+      <div class="title">Scenario Plotter</div>
+    </div>
+    <p class="intro">Enter scenarios, add signal lists, and ask questions grounded in selected source feeds.</p>
+    <div class="toolbar">
+      <div class="button-row"><button type="button" id="new-session">New session</button></div>
+      <div class="done">Done</div>
+    </div>
+    <div class="tabs button-row">
+      <button type="button" class="tab">Luxury</button>
+      <button type="button" class="tab">Banking</button>
+      <button type="button" class="tab active">Retail</button>
+      <button type="button" class="tab">Government</button>
+      <button type="button" class="tab">OSINT</button>
+    </div>
+
+    <div class="scenario-grid" id="scenario-grid"></div>
 
     <div class="results" id="results"></div>
 
@@ -145,10 +249,10 @@
     <details class="source-editor">
       <summary>Add / edit source URLs</summary>
       <div class="source-editor-grid">
-        <input id="new-source-name" placeholder="Source name" />
-        <input id="new-source-url" placeholder="RSS feed URL" />
+        <input id="new-source-name" placeholder="SOURCE NAME" />
+        <input id="new-source-url" placeholder="RSS FEED URL" />
         <input id="new-source-reliability" placeholder="70" inputmode="numeric" />
-        <button id="add-source" type="button">add</button>
+        <button id="add-source" type="button">Add</button>
       </div>
       <p class="small">Use RSS feed URLs. Reliability is 0-100 and is multiplied by signal relevance to produce weighting.</p>
     </details>
@@ -193,10 +297,10 @@
           scenarioGrid.appendChild(row);
         }
         const go = document.createElement('button');
-        go.className = 'go';
+        go.className = 'go primary';
         go.id = 'go';
         go.type = 'button';
-        go.textContent = 'go';
+        go.textContent = 'Generate';
         go.addEventListener('click', assess);
         scenarioGrid.appendChild(go);
       }
@@ -208,14 +312,14 @@
           card.className = 'result-card';
           card.id = `result-${i}`;
           card.innerHTML = i === 0
-            ? 'Scenario likelihood: %'
-            : `Scenario ${i + 1} likelihood: %<br>(if entered)`;
+            ? '<span><strong>Scenario likelihood</strong><br>%</span>'
+            : `<span><strong>Scenario ${i + 1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;
           results.appendChild(card);
         }
       }
 
       function renderSources(sourceWeightsByName) {
-        sources.innerHTML = '<div class="sources-title">Sources used:</div><div></div>';
+        sources.innerHTML = '<div class="sources-title"><span class="section-label">Sources used</span><button type="button">Show</button></div>';
         state.sources.forEach((source, index) => {
           const weight = sourceWeightsByName?.get(source.name);
           const line = document.createElement('div');
@@ -227,7 +331,7 @@
           const toggle = document.createElement('button');
           toggle.className = 'source-toggle' + (source.enabled ? '' : ' off');
           toggle.type = 'button';
-          toggle.textContent = source.enabled ? 'select/ deselect' : 'deselected';
+          toggle.textContent = source.enabled ? 'Select / deselect' : 'Deselected';
           toggle.addEventListener('click', () => {
             state.sources[index].enabled = !state.sources[index].enabled;
             persistSources();
@@ -302,11 +406,11 @@
           const card = document.getElementById(`result-${i}`);
           const scenario = scenarios[i];
           if (!scenario) {
-            card.innerHTML = `Scenario ${i + 1} likelihood: %<br>(if entered)`;
+            card.innerHTML = `<span><strong>Scenario ${i + 1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;
             continue;
           }
           const score = byName.get(scenario.name) || data.scenario_scores?.[i];
-          card.innerHTML = `<strong>${scenario.name}</strong><br>${Math.round(score?.likelihood_percent || 0)}%<br><span class="small">${score?.rationale || ''}</span>`;
+          card.innerHTML = `<span><strong>${scenario.name}</strong><br>${Math.round(score?.likelihood_percent || 0)}%<br><span class="small">${score?.rationale || ''}</span></span>`;
         }
 
         const sourceWeightsByName = new Map();
@@ -344,6 +448,16 @@
         document.getElementById('new-source-name').value = '';
         document.getElementById('new-source-url').value = '';
         document.getElementById('new-source-reliability').value = '';
+      });
+
+      document.getElementById('new-session').addEventListener('click', () => {
+        for (let i = 0; i < 4; i += 1) {
+          document.getElementById(`scenario-${i}`).value = '';
+          document.getElementById(`signals-${i}`).value = '';
+        }
+        status.textContent = 'New session started.';
+        evidence.innerHTML = '';
+        renderEmptyResults();
       });
 
       renderScenarios();
