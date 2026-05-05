@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Custom Scenario Plotter</title>
+  <style>
+    :root {
+      --bg: #050505;
+      --panel: #0d0d0d;
+      --orange: #f09632;
+      --orange-dark: #c26900;
+      --orange-soft: #f6b66d;
+      --cream: #f8ca98;
+      --text: #f4a33e;
+      --muted: #b46f24;
+      --black: #050505;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.45 Arial, Helvetica, sans-serif;
+    }
+    .fsp-widget {
+      width: 100%;
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 18px;
+      background: var(--bg);
+    }
+    .grid { display: grid; gap: 10px 18px; }
+    .scenario-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 92px; align-items: stretch; }
+    .scenario-row { display: contents; }
+    input, textarea, button {
+      font: inherit;
+      border-radius: 0;
+    }
+    input, textarea {
+      width: 100%;
+      background: var(--black);
+      color: var(--text);
+      border: 1px solid var(--orange);
+      outline: none;
+      padding: 7px 10px;
+      min-height: 33px;
+    }
+    textarea { min-height: 34px; resize: vertical; }
+    input::placeholder, textarea::placeholder { color: var(--text); opacity: 0.95; }
+    button {
+      cursor: pointer;
+      border: 1px solid var(--orange);
+      background: var(--orange);
+      color: #080808;
+      padding: 8px 12px;
+      min-height: 33px;
+    }
+    button:hover { filter: brightness(1.07); }
+    button:disabled { opacity: 0.55; cursor: wait; }
+    .go {
+      grid-column: 3;
+      grid-row: 1 / span 4;
+      min-height: 152px;
+      font-size: 18px;
+    }
+    .results {
+      margin-top: 48px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 22px;
+    }
+    .result-card {
+      min-height: 76px;
+      border: 1px solid var(--orange);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: #090909;
+      padding: 12px;
+    }
+    .result-card:nth-child(1) { background: var(--orange-dark); }
+    .result-card:nth-child(2) { background: var(--orange-soft); }
+    .result-card:nth-child(3) { background: #814300; color: var(--text); }
+    .result-card:nth-child(4) { background: var(--cream); }
+    .sources {
+      margin-top: 52px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 180px;
+      gap: 11px 8px;
+      align-items: stretch;
+    }
+    .sources-title, .source-line {
+      border: 1px solid var(--orange);
+      background: var(--black);
+      min-height: 39px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 8px 10px;
+    }
+    .sources-title { grid-column: 1 / 2; }
+    .source-toggle {
+      background: var(--orange);
+      color: #080808;
+      border: 1px solid var(--orange);
+      min-height: 39px;
+    }
+    .source-toggle.off { background: #222; color: var(--text); }
+    .status, .evidence {
+      margin-top: 18px;
+      color: var(--cream);
+      font-size: 14px;
+    }
+    .evidence a { color: var(--orange-soft); }
+    .source-editor {
+      margin-top: 18px;
+      border: 1px solid rgba(240,150,50,.55);
+      padding: 12px;
+    }
+    .source-editor summary { cursor: pointer; color: var(--cream); }
+    .source-editor-grid { margin-top: 10px; display: grid; grid-template-columns: 1fr 2fr 90px auto; gap: 8px; }
+    .small { font-size: 13px; color: var(--muted); }
+    @media (max-width: 720px) {
+      .scenario-grid { grid-template-columns: 1fr; }
+      .scenario-row { display: grid; gap: 8px; }
+      .go { grid-column: auto; grid-row: auto; min-height: 44px; }
+      .results { grid-template-columns: 1fr; margin-top: 26px; }
+      .sources { grid-template-columns: 1fr; margin-top: 28px; }
+      .sources-title { grid-column: auto; }
+      .source-editor-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="fsp-widget" id="fsp-widget">
+    <div class="grid scenario-grid" id="scenario-grid"></div>
+
+    <div class="results" id="results"></div>
+
+    <div class="sources" id="sources"></div>
+
+    <details class="source-editor">
+      <summary>Add / edit source URLs</summary>
+      <div class="source-editor-grid">
+        <input id="new-source-name" placeholder="Source name" />
+        <input id="new-source-url" placeholder="RSS feed URL" />
+        <input id="new-source-reliability" placeholder="70" inputmode="numeric" />
+        <button id="add-source" type="button">add</button>
+      </div>
+      <p class="small">Use RSS feed URLs. Reliability is 0-100 and is multiplied by signal relevance to produce weighting.</p>
+    </details>
+
+    <div class="status" id="status"></div>
+    <div class="evidence" id="evidence"></div>
+  </div>
+
+  <script>
+    (function () {
+      const API_BASE = new URLSearchParams(location.search).get('api') || location.origin;
+      const API_URL = API_BASE.replace(/\/$/, '') + '/api/custom-scenario-assessment';
+
+      const defaultSources = [
+        { id: 'bbc-world', name: 'BBC World', url: 'http://feeds.bbci.co.uk/news/world/rss.xml', reliability: 82, enabled: true },
+        { id: 'guardian-world', name: 'Guardian World', url: 'https://www.theguardian.com/world/rss', reliability: 78, enabled: true },
+        { id: 'al-jazeera', name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', reliability: 75, enabled: true },
+        { id: 'ft-news', name: 'Financial Times', url: 'https://www.ft.com/news-feed?format=rss', reliability: 84, enabled: true },
+        { id: 'google-news', name: 'Google News', url: 'https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en', reliability: 65, enabled: true }
+      ];
+
+      const state = {
+        sources: JSON.parse(localStorage.getItem('fsp-custom-sources') || 'null') || defaultSources,
+        latest: null
+      };
+
+      const scenarioGrid = document.getElementById('scenario-grid');
+      const results = document.getElementById('results');
+      const sources = document.getElementById('sources');
+      const status = document.getElementById('status');
+      const evidence = document.getElementById('evidence');
+
+      function renderScenarios() {
+        scenarioGrid.innerHTML = '';
+        for (let i = 0; i < 4; i += 1) {
+          const row = document.createElement('div');
+          row.className = 'scenario-row';
+          row.innerHTML = `
+            <input id="scenario-${i}" placeholder="${i === 0 ? 'Describe scenario' : `Describe scenario ${i + 1} (optional)`}" />
+            <textarea id="signals-${i}" placeholder="List signals"></textarea>
+          `;
+          scenarioGrid.appendChild(row);
+        }
+        const go = document.createElement('button');
+        go.className = 'go';
+        go.id = 'go';
+        go.type = 'button';
+        go.textContent = 'go';
+        go.addEventListener('click', assess);
+        scenarioGrid.appendChild(go);
+      }
+
+      function renderEmptyResults() {
+        results.innerHTML = '';
+        for (let i = 0; i < 4; i += 1) {
+          const card = document.createElement('div');
+          card.className = 'result-card';
+          card.id = `result-${i}`;
+          card.innerHTML = i === 0
+            ? 'Scenario likelihood: %'
+            : `Scenario ${i + 1} likelihood: %<br>(if entered)`;
+          results.appendChild(card);
+        }
+      }
+
+      function renderSources(sourceWeightsByName) {
+        sources.innerHTML = '<div class="sources-title">Sources used:</div><div></div>';
+        state.sources.forEach((source, index) => {
+          const weight = sourceWeightsByName?.get(source.name);
+          const line = document.createElement('div');
+          line.className = 'source-line';
+          line.textContent = weight
+            ? `${source.name}: relevancy ${Math.round(weight.relevance_percent)}% reliability ${Math.round(weight.reliability_percent)}% = weighting ${Math.round(weight.weighting_percent)}%`
+            : `${source.name}: reliability ${source.reliability}%`;
+
+          const toggle = document.createElement('button');
+          toggle.className = 'source-toggle' + (source.enabled ? '' : ' off');
+          toggle.type = 'button';
+          toggle.textContent = source.enabled ? 'select/ deselect' : 'deselected';
+          toggle.addEventListener('click', () => {
+            state.sources[index].enabled = !state.sources[index].enabled;
+            persistSources();
+            renderSources(sourceWeightsByName);
+          });
+
+          sources.appendChild(line);
+          sources.appendChild(toggle);
+        });
+      }
+
+      function persistSources() {
+        localStorage.setItem('fsp-custom-sources', JSON.stringify(state.sources));
+      }
+
+      function collectScenarios() {
+        const scenarios = [];
+        for (let i = 0; i < 4; i += 1) {
+          const description = document.getElementById(`scenario-${i}`).value.trim();
+          const signals = document.getElementById(`signals-${i}`).value
+            .split(/[\n,;]+/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+          if (description && signals.length) {
+            scenarios.push({ name: description.slice(0, 80), description, signals });
+          }
+        }
+        return scenarios;
+      }
+
+      async function assess() {
+        const scenarios = collectScenarios();
+        if (!scenarios.length) {
+          status.textContent = 'Enter at least one scenario and at least one signal.';
+          return;
+        }
+
+        const selectedSources = state.sources.filter((source) => source.enabled);
+        if (!selectedSources.length) {
+          status.textContent = 'Select at least one source.';
+          return;
+        }
+
+        const go = document.getElementById('go');
+        go.disabled = true;
+        status.textContent = 'Scanning selected sources and estimating likelihood...';
+        evidence.innerHTML = '';
+
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scenarios, sources: selectedSources })
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Assessment failed');
+          state.latest = data;
+          renderAssessment(data, scenarios);
+          status.textContent = `Assessment complete. Confidence: ${data.confidence || 'low'}.`;
+        } catch (error) {
+          status.textContent = error.message || 'Assessment failed.';
+        } finally {
+          go.disabled = false;
+        }
+      }
+
+      function renderAssessment(data, scenarios) {
+        const byName = new Map();
+        (data.scenario_scores || []).forEach((score) => byName.set(score.scenario, score));
+
+        for (let i = 0; i < 4; i += 1) {
+          const card = document.getElementById(`result-${i}`);
+          const scenario = scenarios[i];
+          if (!scenario) {
+            card.innerHTML = `Scenario ${i + 1} likelihood: %<br>(if entered)`;
+            continue;
+          }
+          const score = byName.get(scenario.name) || data.scenario_scores?.[i];
+          card.innerHTML = `<strong>${scenario.name}</strong><br>${Math.round(score?.likelihood_percent || 0)}%<br><span class="small">${score?.rationale || ''}</span>`;
+        }
+
+        const sourceWeightsByName = new Map();
+        (data.scenario_scores || []).forEach((score) => {
+          (score.source_weights || []).forEach((weight) => {
+            const existing = sourceWeightsByName.get(weight.name);
+            if (!existing || weight.weighting_percent > existing.weighting_percent) {
+              sourceWeightsByName.set(weight.name, weight);
+            }
+          });
+        });
+        renderSources(sourceWeightsByName);
+
+        evidence.innerHTML = (data.evidence_articles || []).slice(0, 6).map((article) =>
+          `<div><strong>${escapeHtml(article.source)}</strong>: <a href="${escapeAttr(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></div>`
+        ).join('');
+      }
+
+      function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]));
+      }
+      function escapeAttr(value) { return escapeHtml(value).replace(/'/g, '&#039;'); }
+
+      document.getElementById('add-source').addEventListener('click', () => {
+        const name = document.getElementById('new-source-name').value.trim();
+        const url = document.getElementById('new-source-url').value.trim();
+        const reliability = Number(document.getElementById('new-source-reliability').value || 70);
+        if (!name || !url) {
+          status.textContent = 'Enter a source name and RSS URL.';
+          return;
+        }
+        state.sources.push({ id: `custom-${Date.now()}`, name, url, reliability: Math.max(0, Math.min(100, reliability)), enabled: true });
+        persistSources();
+        renderSources();
+        document.getElementById('new-source-name').value = '';
+        document.getElementById('new-source-url').value = '';
+        document.getElementById('new-source-reliability').value = '';
+      });
+
+      renderScenarios();
+      renderEmptyResults();
+      renderSources();
+    })();
+  </script>
+</body>
+</html>
