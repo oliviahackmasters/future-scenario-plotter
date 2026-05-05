@@ -5,400 +5,66 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Custom Scenario Plotter</title>
   <style>
-    :root{
-      --hm-black:#000000;
-      --hm-white:#FFFFFF;
-      --hm-copper:#D18057;
-    }
+    :root{--hm-black:#000;--hm-white:#fff;--hm-copper:#D18057}
+    html,body{margin:0;min-height:100%;background:var(--hm-black)}
+    #hmScenarioPlotter *{box-sizing:border-box}
+    #hmScenarioPlotter{font-family:"Montserrat",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--hm-black);color:var(--hm-white);width:100%}
+    #hmScenarioPlotter .hm-wrap{background:var(--hm-black);color:var(--hm-white);border:1px solid var(--hm-copper);padding:18px;letter-spacing:.2px;width:100%;max-width:100%;margin:0}
+    #hmScenarioPlotter .hm-titlebar{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 0 14px}
+    #hmScenarioPlotter .hm-title{display:flex;align-items:center;gap:10px;margin:0;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;font-size:14px;color:var(--hm-white)}
+    #hmScenarioPlotter .hm-badge{display:inline-block;border:1px solid var(--hm-copper);padding:6px 10px;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;font-size:12px;color:var(--hm-copper)}
+    #hmScenarioPlotter .hm-status{font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:rgba(255,255,255,.85);border:1px solid rgba(209,128,87,.55);padding:8px 10px;min-height:36px;display:flex;align-items:center}
+    #hmScenarioPlotter .hm-sub{margin:0 0 14px;font-size:12px;line-height:1.5;color:rgba(255,255,255,.85);max-width:900px}
+    #hmScenarioPlotter .hm-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px}
+    #hmScenarioPlotter .hm-button-row{display:flex;flex-wrap:wrap;gap:9px}
+    #hmScenarioPlotter button{appearance:none;cursor:pointer;background:var(--hm-black);color:var(--hm-white);border:1px solid var(--hm-copper);border-radius:0;padding:11px 14px;min-height:42px;font:inherit;font-size:12px;font-weight:700;letter-spacing:.9px;text-transform:uppercase}
+    #hmScenarioPlotter button:hover{background:rgba(209,128,87,.12)}
+    #hmScenarioPlotter button:disabled{opacity:.55;cursor:wait}
+    #hmScenarioPlotter .primary{background:var(--hm-copper);color:var(--hm-black);border-color:var(--hm-copper)}
+    #hmScenarioPlotter .primary:hover{background:var(--hm-copper);filter:brightness(1.05)}
+    #hmScenarioPlotter input,#hmScenarioPlotter textarea{width:100%;background:var(--hm-black);color:var(--hm-white);border:1px solid var(--hm-copper);border-radius:0;outline:none;padding:12px 14px;min-height:44px;font:inherit;font-size:13px;line-height:1.45}
+    #hmScenarioPlotter textarea{resize:none;overflow:hidden;min-height:44px;height:auto}
+    #hmScenarioPlotter input::placeholder,#hmScenarioPlotter textarea::placeholder{color:rgba(255,255,255,.55);opacity:1}
 
-    html, body{
-      margin:0;
-      min-height:100%;
-      background:var(--hm-black);
-    }
+    /* 50/50 scenario and signal columns, with a fixed generate button column. */
+    #hmScenarioPlotter .scenario-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 118px;gap:12px;margin:0 0 14px;width:100%;min-width:0;align-items:stretch}
+    #hmScenarioPlotter .scenario-row{display:contents}
+    #hmScenarioPlotter .go{grid-column:3;grid-row:1 / span 4;min-height:212px}
 
-    #hmScenarioPlotter *{ box-sizing:border-box; }
-
-    #hmScenarioPlotter{
-      font-family:"Montserrat", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background:var(--hm-black);
-      color:var(--hm-white);
-      width:100%;
-    }
-
-    #hmScenarioPlotter .hm-wrap{
-      background:var(--hm-black);
-      color:var(--hm-white);
-      border:1px solid var(--hm-copper);
-      padding:18px;
-      letter-spacing:0.2px;
-      width:100%;
-      max-width:100%;
-      margin:0;
-    }
-
-    #hmScenarioPlotter .hm-titlebar{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:14px;
-      flex-wrap:wrap;
-      margin:0 0 14px 0;
-    }
-
-    #hmScenarioPlotter .hm-title{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      margin:0;
-      font-weight:700;
-      text-transform:uppercase;
-      letter-spacing:1.2px;
-      font-size:14px;
-      color:var(--hm-white);
-    }
-
-    #hmScenarioPlotter .hm-badge{
-      display:inline-block;
-      border:1px solid var(--hm-copper);
-      padding:6px 10px;
-      font-weight:700;
-      text-transform:uppercase;
-      letter-spacing:1.4px;
-      font-size:12px;
-      color:var(--hm-copper);
-    }
-
-    #hmScenarioPlotter .hm-status{
-      font-size:12px;
-      letter-spacing:0.9px;
-      text-transform:uppercase;
-      color:rgba(255,255,255,0.85);
-      border:1px solid rgba(209,128,87,0.55);
-      padding:8px 10px;
-      min-height:36px;
-      display:flex;
-      align-items:center;
-    }
-
-    #hmScenarioPlotter .hm-status.is-error{
-      color:var(--hm-copper);
-    }
-
-    #hmScenarioPlotter .hm-sub{
-      margin:0 0 14px 0;
-      font-size:12px;
-      line-height:1.5;
-      color:rgba(255,255,255,0.85);
-      max-width:900px;
-    }
-
-    #hmScenarioPlotter .hm-toolbar{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      flex-wrap:wrap;
-      margin:0 0 14px 0;
-    }
-
-    #hmScenarioPlotter .hm-button-row{
-      display:flex;
-      flex-wrap:wrap;
-      gap:9px;
-    }
-
-    #hmScenarioPlotter .hm-button,
-    #hmScenarioPlotter button{
-      appearance:none;
-      cursor:pointer;
-      background:var(--hm-black);
-      color:var(--hm-white);
-      border:1px solid var(--hm-copper);
-      border-radius:0;
-      padding:11px 14px;
-      min-height:42px;
-      font:inherit;
-      font-size:12px;
-      font-weight:700;
-      letter-spacing:0.9px;
-      text-transform:uppercase;
-    }
-
-    #hmScenarioPlotter .hm-button:hover,
-    #hmScenarioPlotter button:hover{
-      background:rgba(209,128,87,0.12);
-    }
-
-    #hmScenarioPlotter button:disabled{
-      opacity:0.55;
-      cursor:wait;
-    }
-
-    #hmScenarioPlotter .hm-button-primary,
-    #hmScenarioPlotter .primary{
-      background:var(--hm-copper);
-      color:var(--hm-black);
-      border-color:var(--hm-copper);
-    }
-
-    #hmScenarioPlotter .hm-button-primary:hover,
-    #hmScenarioPlotter .primary:hover{
-      background:var(--hm-copper);
-      filter:brightness(1.05);
-    }
-
-    #hmScenarioPlotter input,
-    #hmScenarioPlotter textarea{
-      width:100%;
-      background:var(--hm-black);
-      color:var(--hm-white);
-      border:1px solid var(--hm-copper);
-      border-radius:0;
-      outline:none;
-      padding:12px 14px;
-      min-height:44px;
-      font:inherit;
-      font-size:13px;
-      line-height:1.45;
-    }
-
-    #hmScenarioPlotter textarea{
-      resize:vertical;
-      min-height:44px;
-    }
-
-    #hmScenarioPlotter input::placeholder,
-    #hmScenarioPlotter textarea::placeholder{
-      color:rgba(255,255,255,0.55);
-      opacity:1;
-    }
-
-    #hmScenarioPlotter .hm-top-grid,
-    #hmScenarioPlotter .scenario-grid{
-      display:grid;
-      grid-template-columns:minmax(0, 7fr) minmax(0, 3fr) 118px;
-      gap:12px;
-      margin:0 0 14px 0;
-      width:100%;
-      min-width:0;
-    }
-
-    #hmScenarioPlotter .scenario-row{
-      display:contents;
-    }
-
-    #hmScenarioPlotter .go{
-      grid-column:3;
-      grid-row:1 / span 4;
-      min-height:212px;
-    }
-
-    #hmScenarioPlotter .hm-card,
-    #hmScenarioPlotter .result-card,
-    #hmScenarioPlotter .source-line,
-    #hmScenarioPlotter .sources-title,
-    #hmScenarioPlotter .source-editor,
-    #hmScenarioPlotter .evidence{
-      border:1px solid var(--hm-copper);
-      background:rgba(255,255,255,0.01);
-      padding:14px;
-      min-width:0;
-    }
-
-    #hmScenarioPlotter .hm-msg-title,
-    #hmScenarioPlotter .section-label,
-    #hmScenarioPlotter .source-editor summary,
-    #hmScenarioPlotter .result-card strong{
-      margin:0 0 8px 0;
-      font-size:12px;
-      font-weight:700;
-      text-transform:uppercase;
-      letter-spacing:0.8px;
-      color:var(--hm-white);
-    }
-
-    #hmScenarioPlotter .hm-results-grid,
-    #hmScenarioPlotter .results{
-      display:grid;
-      grid-template-columns:repeat(4, minmax(0, 1fr));
-      gap:12px;
-      width:100%;
-      max-width:100%;
-      min-width:0;
-      margin:0 0 14px 0;
-    }
-
-    #hmScenarioPlotter .result-card{
-      min-height:120px;
-      display:flex;
-      align-items:flex-start;
-      justify-content:flex-start;
-      text-align:left;
-      color:var(--hm-white);
-      overflow-wrap:anywhere;
-      word-break:break-word;
-    }
-
-    #hmScenarioPlotter .result-card span,
-    #hmScenarioPlotter .result-card p{
-      font-size:13px;
-      line-height:1.5;
-      margin:0 0 8px 0;
-    }
-
-    #hmScenarioPlotter .sources{
-      display:grid;
-      grid-template-columns:minmax(0, 1fr) 150px;
-      gap:12px;
-      margin:0 0 14px 0;
-      width:100%;
-      min-width:0;
-    }
-
-    #hmScenarioPlotter .sources-title{
-      grid-column:1 / -1;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      min-height:52px;
-    }
-
-    #hmScenarioPlotter .source-line{
-      color:rgba(255,255,255,0.9);
-      font-size:13px;
-      line-height:1.45;
-      display:flex;
-      align-items:center;
-      min-height:52px;
-    }
-
-    #hmScenarioPlotter .source-toggle.off{
-      color:rgba(255,255,255,0.45);
-      border-color:rgba(209,128,87,0.45);
-      background:rgba(255,255,255,0.04);
-    }
-
-    #hmScenarioPlotter .source-editor{
-      margin:0 0 14px 0;
-    }
-
-    #hmScenarioPlotter .source-editor summary{
-      cursor:pointer;
-      list-style:none;
-      margin:0;
-    }
-
-    #hmScenarioPlotter .source-editor summary::-webkit-details-marker{
-      display:none;
-    }
-
-    #hmScenarioPlotter .source-editor-grid{
-      margin-top:12px;
-      display:grid;
-      grid-template-columns:minmax(0, 1.1fr) minmax(0, 2fr) 90px auto;
-      gap:12px;
-    }
-
-    #hmScenarioPlotter .status{
-      margin:0 0 14px 0;
-      font-size:12px;
-      line-height:1.5;
-      color:rgba(255,255,255,0.78);
-      text-transform:uppercase;
-      letter-spacing:0.8px;
-    }
-
-    #hmScenarioPlotter .evidence{
-      margin:0;
-      max-height:260px;
-      overflow:auto;
-      color:rgba(255,255,255,0.9);
-      font-size:13px;
-      line-height:1.5;
-    }
-
-    #hmScenarioPlotter .evidence:empty{
-      display:none;
-    }
-
-    #hmScenarioPlotter .evidence a{
-      color:var(--hm-white);
-      text-decoration:underline;
-      text-decoration-color:var(--hm-copper);
-    }
-
-    #hmScenarioPlotter .small{
-      font-size:12px;
-      line-height:1.5;
-      color:rgba(255,255,255,0.62);
-      font-weight:400;
-      text-transform:none;
-      letter-spacing:0;
-      margin:8px 0 0 0;
-    }
-
-    @media (max-width:900px){
-      #hmScenarioPlotter .hm-top-grid,
-      #hmScenarioPlotter .scenario-grid{
-        grid-template-columns:1fr;
-      }
-
-      #hmScenarioPlotter .scenario-row{
-        display:grid;
-        gap:8px;
-      }
-
-      #hmScenarioPlotter .go{
-        grid-column:auto;
-        grid-row:auto;
-        min-height:44px;
-      }
-
-      #hmScenarioPlotter .hm-results-grid,
-      #hmScenarioPlotter .results{
-        grid-template-columns:repeat(2, minmax(0, 1fr));
-      }
-
-      #hmScenarioPlotter .sources,
-      #hmScenarioPlotter .source-editor-grid{
-        grid-template-columns:1fr;
-      }
-    }
-
-    @media (max-width:560px){
-      #hmScenarioPlotter .hm-wrap{
-        padding:14px;
-      }
-
-      #hmScenarioPlotter .hm-results-grid,
-      #hmScenarioPlotter .results{
-        grid-template-columns:1fr;
-      }
-    }
+    #hmScenarioPlotter .hm-card,#hmScenarioPlotter .result-card,#hmScenarioPlotter .source-line,#hmScenarioPlotter .sources-title,#hmScenarioPlotter .source-editor,#hmScenarioPlotter .evidence{border:1px solid var(--hm-copper);background:rgba(255,255,255,.01);padding:14px;min-width:0}
+    #hmScenarioPlotter .section-label,#hmScenarioPlotter .source-editor summary,#hmScenarioPlotter .result-card strong{margin:0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--hm-white)}
+    #hmScenarioPlotter .results{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;width:100%;max-width:100%;min-width:0;margin:0 0 14px}
+    #hmScenarioPlotter .result-card{min-height:120px;display:flex;align-items:flex-start;justify-content:flex-start;text-align:left;color:var(--hm-white);overflow-wrap:anywhere;word-break:break-word}
+    #hmScenarioPlotter .result-card span,#hmScenarioPlotter .result-card p{font-size:13px;line-height:1.5;margin:0 0 8px}
+    #hmScenarioPlotter .sources{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:12px;margin:0 0 14px;width:100%;min-width:0}
+    #hmScenarioPlotter .sources-title{grid-column:1 / -1;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px}
+    #hmScenarioPlotter .source-line{color:rgba(255,255,255,.9);font-size:13px;line-height:1.45;display:flex;align-items:center;min-height:52px}
+    #hmScenarioPlotter .source-toggle.off{color:rgba(255,255,255,.45);border-color:rgba(209,128,87,.45);background:rgba(255,255,255,.04)}
+    #hmScenarioPlotter .source-editor{margin:0 0 14px}
+    #hmScenarioPlotter .source-editor summary{cursor:pointer;list-style:none;margin:0}
+    #hmScenarioPlotter .source-editor summary::-webkit-details-marker{display:none}
+    #hmScenarioPlotter .source-editor-grid{margin-top:12px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,2fr) 90px auto;gap:12px}
+    #hmScenarioPlotter .status{margin:0 0 14px;font-size:12px;line-height:1.5;color:rgba(255,255,255,.78);text-transform:uppercase;letter-spacing:.8px}
+    #hmScenarioPlotter .evidence{margin:0;max-height:260px;overflow:auto;color:rgba(255,255,255,.9);font-size:13px;line-height:1.5}
+    #hmScenarioPlotter .evidence:empty{display:none}
+    #hmScenarioPlotter .evidence a{color:var(--hm-white);text-decoration:underline;text-decoration-color:var(--hm-copper)}
+    #hmScenarioPlotter .small{font-size:12px;line-height:1.5;color:rgba(255,255,255,.62);font-weight:400;text-transform:none;letter-spacing:0;margin:8px 0 0}
+    @media(max-width:900px){#hmScenarioPlotter .scenario-grid{grid-template-columns:1fr}#hmScenarioPlotter .scenario-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}#hmScenarioPlotter .go{grid-column:auto;grid-row:auto;min-height:44px}#hmScenarioPlotter .results{grid-template-columns:repeat(2,minmax(0,1fr))}#hmScenarioPlotter .sources,#hmScenarioPlotter .source-editor-grid{grid-template-columns:1fr}}
+    @media(max-width:560px){#hmScenarioPlotter .hm-wrap{padding:14px}#hmScenarioPlotter .scenario-row,#hmScenarioPlotter .results{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <div id="hmScenarioPlotter">
-    <div class="fsp-widget hm-wrap" id="fsp-widget">
-      <div class="hm-titlebar topbar">
-        <h1 class="hm-title title"><span class="hm-badge brand">Hackmasters</span> Scenario Plotter</h1>
-        <div class="hm-status done">Done</div>
+    <div class="hm-wrap" id="fsp-widget">
+      <div class="hm-titlebar">
+        <h1 class="hm-title"><span class="hm-badge">Hackmasters</span> Scenario Plotter</h1>
+        <div class="hm-status">Done</div>
       </div>
-
-      <p class="hm-sub intro">Enter scenarios, add signal lists, and ask questions grounded in selected source feeds.</p>
-
-      <div class="hm-toolbar toolbar">
-        <div class="hm-button-row button-row"><button class="hm-button" type="button" id="new-session">New session</button></div>
-      </div>
-
-      <div class="hm-top-grid scenario-grid" id="scenario-grid"></div>
-
-      <div class="hm-results-grid results" id="results"></div>
-
+      <p class="hm-sub">Enter scenarios, add signal lists, and ask questions grounded in selected source feeds.</p>
+      <div class="hm-toolbar"><div class="hm-button-row"><button type="button" id="new-session">New session</button></div></div>
+      <div class="scenario-grid" id="scenario-grid"></div>
+      <div class="results" id="results"></div>
       <div class="sources" id="sources"></div>
-
       <details class="source-editor hm-card">
         <summary>Add / edit source URLs</summary>
         <div class="source-editor-grid">
@@ -409,214 +75,127 @@
         </div>
         <p class="small">Use RSS feed URLs. Reliability is 0-100 and is multiplied by signal relevance to produce weighting.</p>
       </details>
-
       <div class="status" id="status"></div>
       <div class="evidence" id="evidence"></div>
     </div>
   </div>
 
   <script>
-    (function () {
-      const API_BASE = new URLSearchParams(location.search).get('api') || location.origin;
-      const API_URL = API_BASE.replace(/\/$/, '') + '/api/custom-scenario-assessment';
-
-      const defaultSources = [
-        { id: 'bbc-world', name: 'BBC World', url: 'http://feeds.bbci.co.uk/news/world/rss.xml', reliability: 82, enabled: true },
-        { id: 'guardian-world', name: 'Guardian World', url: 'https://www.theguardian.com/world/rss', reliability: 78, enabled: true },
-        { id: 'al-jazeera', name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', reliability: 75, enabled: true },
-        { id: 'ft-news', name: 'Financial Times', url: 'https://www.ft.com/news-feed?format=rss', reliability: 84, enabled: true },
-        { id: 'google-news', name: 'Google News', url: 'https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en', reliability: 65, enabled: true }
+    (function(){
+      const API_BASE=new URLSearchParams(location.search).get('api')||location.origin;
+      const API_URL=API_BASE.replace(/\/$/,'')+'/api/custom-scenario-assessment';
+      const defaultSources=[
+        {id:'bbc-world',name:'BBC World',url:'http://feeds.bbci.co.uk/news/world/rss.xml',reliability:82,enabled:true},
+        {id:'guardian-world',name:'Guardian World',url:'https://www.theguardian.com/world/rss',reliability:78,enabled:true},
+        {id:'al-jazeera',name:'Al Jazeera',url:'https://www.aljazeera.com/xml/rss/all.xml',reliability:75,enabled:true},
+        {id:'ft-news',name:'Financial Times',url:'https://www.ft.com/news-feed?format=rss',reliability:84,enabled:true},
+        {id:'google-news',name:'Google News',url:'https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en',reliability:65,enabled:true}
       ];
+      const state={sources:JSON.parse(localStorage.getItem('fsp-custom-sources')||'null')||defaultSources,latest:null};
+      const scenarioGrid=document.getElementById('scenario-grid');
+      const results=document.getElementById('results');
+      const sources=document.getElementById('sources');
+      const status=document.getElementById('status');
+      const evidence=document.getElementById('evidence');
 
-      const state = {
-        sources: JSON.parse(localStorage.getItem('fsp-custom-sources') || 'null') || defaultSources,
-        latest: null
-      };
-
-      const scenarioGrid = document.getElementById('scenario-grid');
-      const results = document.getElementById('results');
-      const sources = document.getElementById('sources');
-      const status = document.getElementById('status');
-      const evidence = document.getElementById('evidence');
-
-      function renderScenarios() {
-        scenarioGrid.innerHTML = '';
-        for (let i = 0; i < 4; i += 1) {
-          const row = document.createElement('div');
-          row.className = 'scenario-row';
-          row.innerHTML = `
-            <input id="scenario-${i}" placeholder="${i === 0 ? 'Describe scenario' : `Describe scenario ${i + 1} (optional)`}" />
-            <textarea id="signals-${i}" placeholder="List signals"></textarea>
-          `;
+      function autoGrow(el){el.style.height='auto';el.style.height=el.scrollHeight+'px'}
+      function renderScenarios(){
+        scenarioGrid.innerHTML='';
+        for(let i=0;i<4;i+=1){
+          const row=document.createElement('div');
+          row.className='scenario-row';
+          row.innerHTML=`<input id="scenario-${i}" placeholder="${i===0?'Describe scenario':`Describe scenario ${i+1} (optional)`}" /><textarea id="signals-${i}" placeholder="List signals"></textarea>`;
           scenarioGrid.appendChild(row);
+          const textarea=row.querySelector('textarea');
+          textarea.addEventListener('input',()=>autoGrow(textarea));
+          autoGrow(textarea);
         }
-        const go = document.createElement('button');
-        go.className = 'go primary hm-button-primary';
-        go.id = 'go';
-        go.type = 'button';
-        go.textContent = 'Generate';
-        go.addEventListener('click', assess);
+        const go=document.createElement('button');
+        go.className='go primary';
+        go.id='go';
+        go.type='button';
+        go.textContent='Generate';
+        go.addEventListener('click',assess);
         scenarioGrid.appendChild(go);
       }
-
-      function renderEmptyResults() {
-        results.innerHTML = '';
-        for (let i = 0; i < 4; i += 1) {
-          const card = document.createElement('div');
-          card.className = 'result-card hm-result-card';
-          card.id = `result-${i}`;
-          card.innerHTML = i === 0
-            ? '<span><strong>Scenario likelihood</strong><br>%</span>'
-            : `<span><strong>Scenario ${i + 1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;
+      function renderEmptyResults(){
+        results.innerHTML='';
+        for(let i=0;i<4;i+=1){
+          const card=document.createElement('div');
+          card.className='result-card';
+          card.id=`result-${i}`;
+          card.innerHTML=i===0?'<span><strong>Scenario likelihood</strong><br>%</span>':`<span><strong>Scenario ${i+1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;
           results.appendChild(card);
         }
       }
-
-      function renderSources(sourceWeightsByName) {
-        sources.innerHTML = '<div class="sources-title hm-card"><span class="section-label hm-msg-title">Sources used</span><button type="button">Show</button></div>';
-        state.sources.forEach((source, index) => {
-          const weight = sourceWeightsByName?.get(source.name);
-          const line = document.createElement('div');
-          line.className = 'source-line hm-card';
-          line.textContent = weight
-            ? `${source.name}: relevancy ${Math.round(weight.relevance_percent)}% reliability ${Math.round(weight.reliability_percent)}% = weighting ${Math.round(weight.weighting_percent)}%`
-            : `${source.name}: reliability ${source.reliability}%`;
-
-          const toggle = document.createElement('button');
-          toggle.className = 'source-toggle hm-button' + (source.enabled ? '' : ' off');
-          toggle.type = 'button';
-          toggle.textContent = source.enabled ? 'Select / deselect' : 'Deselected';
-          toggle.addEventListener('click', () => {
-            state.sources[index].enabled = !state.sources[index].enabled;
-            persistSources();
-            renderSources(sourceWeightsByName);
-          });
-
-          sources.appendChild(line);
-          sources.appendChild(toggle);
+      function renderSources(sourceWeightsByName){
+        sources.innerHTML='<div class="sources-title hm-card"><span class="section-label">Sources used</span><button type="button">Show</button></div>';
+        state.sources.forEach((source,index)=>{
+          const weight=sourceWeightsByName?.get(source.name);
+          const line=document.createElement('div');
+          line.className='source-line hm-card';
+          line.textContent=weight?`${source.name}: relevancy ${Math.round(weight.relevance_percent)}% reliability ${Math.round(weight.reliability_percent)}% = weighting ${Math.round(weight.weighting_percent)}%`:`${source.name}: reliability ${source.reliability}%`;
+          const toggle=document.createElement('button');
+          toggle.className='source-toggle'+(source.enabled?'':' off');
+          toggle.type='button';
+          toggle.textContent=source.enabled?'Select / deselect':'Deselected';
+          toggle.addEventListener('click',()=>{state.sources[index].enabled=!state.sources[index].enabled;persistSources();renderSources(sourceWeightsByName)});
+          sources.appendChild(line);sources.appendChild(toggle);
         });
       }
-
-      function persistSources() {
-        localStorage.setItem('fsp-custom-sources', JSON.stringify(state.sources));
-      }
-
-      function collectScenarios() {
-        const scenarios = [];
-        for (let i = 0; i < 4; i += 1) {
-          const description = document.getElementById(`scenario-${i}`).value.trim();
-          const signals = document.getElementById(`signals-${i}`).value
-            .split(/[\n,;]+/)
-            .map((item) => item.trim())
-            .filter(Boolean);
-          if (description && signals.length) {
-            scenarios.push({ name: description.slice(0, 80), description, signals });
-          }
+      function persistSources(){localStorage.setItem('fsp-custom-sources',JSON.stringify(state.sources))}
+      function collectScenarios(){
+        const scenarios=[];
+        for(let i=0;i<4;i+=1){
+          const description=document.getElementById(`scenario-${i}`).value.trim();
+          const signals=document.getElementById(`signals-${i}`).value.split(/[\n,;]+/).map(item=>item.trim()).filter(Boolean);
+          if(description&&signals.length)scenarios.push({name:description.slice(0,80),description,signals});
         }
         return scenarios;
       }
-
-      async function assess() {
-        const scenarios = collectScenarios();
-        if (!scenarios.length) {
-          status.textContent = 'Enter at least one scenario and at least one signal.';
-          return;
-        }
-
-        const selectedSources = state.sources.filter((source) => source.enabled);
-        if (!selectedSources.length) {
-          status.textContent = 'Select at least one source.';
-          return;
-        }
-
-        const go = document.getElementById('go');
-        go.disabled = true;
-        status.textContent = 'Scanning selected sources and estimating likelihood...';
-        evidence.innerHTML = '';
-
-        try {
-          const response = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scenarios, sources: selectedSources })
-          });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error || 'Assessment failed');
-          state.latest = data;
-          renderAssessment(data, scenarios);
-          status.textContent = `Assessment complete. Confidence: ${data.confidence || 'low'}.`;
-        } catch (error) {
-          status.textContent = error.message || 'Assessment failed.';
-        } finally {
-          go.disabled = false;
-        }
+      async function assess(){
+        const scenarios=collectScenarios();
+        if(!scenarios.length){status.textContent='Enter at least one scenario and at least one signal.';return}
+        const selectedSources=state.sources.filter(source=>source.enabled);
+        if(!selectedSources.length){status.textContent='Select at least one source.';return}
+        const go=document.getElementById('go');
+        go.disabled=true;status.textContent='Scanning selected sources and estimating likelihood...';evidence.innerHTML='';
+        try{
+          const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenarios,sources:selectedSources})});
+          const data=await response.json();
+          if(!response.ok)throw new Error(data.error||'Assessment failed');
+          state.latest=data;renderAssessment(data,scenarios);status.textContent=`Assessment complete. Confidence: ${data.confidence||'low'}.`;
+        }catch(error){status.textContent=error.message||'Assessment failed.'}finally{go.disabled=false}
       }
-
-      function renderAssessment(data, scenarios) {
-        const byName = new Map();
-        (data.scenario_scores || []).forEach((score) => byName.set(score.scenario, score));
-
-        for (let i = 0; i < 4; i += 1) {
-          const card = document.getElementById(`result-${i}`);
-          const scenario = scenarios[i];
-          if (!scenario) {
-            card.innerHTML = `<span><strong>Scenario ${i + 1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;
-            continue;
-          }
-          const score = byName.get(scenario.name) || data.scenario_scores?.[i];
-          card.innerHTML = `<span><strong>${scenario.name}</strong><br>${Math.round(score?.likelihood_percent || 0)}%<br><span class="small">${score?.rationale || ''}</span></span>`;
+      function renderAssessment(data,scenarios){
+        const byName=new Map();
+        (data.scenario_scores||[]).forEach(score=>byName.set(score.scenario,score));
+        for(let i=0;i<4;i+=1){
+          const card=document.getElementById(`result-${i}`);const scenario=scenarios[i];
+          if(!scenario){card.innerHTML=`<span><strong>Scenario ${i+1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;continue}
+          const score=byName.get(scenario.name)||data.scenario_scores?.[i];
+          card.innerHTML=`<span><strong>${scenario.name}</strong><br>${Math.round(score?.likelihood_percent||0)}%<br><span class="small">${score?.rationale||''}</span></span>`;
         }
-
-        const sourceWeightsByName = new Map();
-        (data.scenario_scores || []).forEach((score) => {
-          (score.source_weights || []).forEach((weight) => {
-            const existing = sourceWeightsByName.get(weight.name);
-            if (!existing || weight.weighting_percent > existing.weighting_percent) {
-              sourceWeightsByName.set(weight.name, weight);
-            }
-          });
-        });
+        const sourceWeightsByName=new Map();
+        (data.scenario_scores||[]).forEach(score=>(score.source_weights||[]).forEach(weight=>{const existing=sourceWeightsByName.get(weight.name);if(!existing||weight.weighting_percent>existing.weighting_percent)sourceWeightsByName.set(weight.name,weight)}));
         renderSources(sourceWeightsByName);
-
-        evidence.innerHTML = (data.evidence_articles || []).slice(0, 6).map((article) =>
-          `<div><strong>${escapeHtml(article.source)}</strong>: <a href="${escapeAttr(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></div>`
-        ).join('');
+        evidence.innerHTML=(data.evidence_articles||[]).slice(0,6).map(article=>`<div><strong>${escapeHtml(article.source)}</strong>: <a href="${escapeAttr(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></div>`).join('');
       }
-
-      function escapeHtml(value) {
-        return String(value || '').replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]));
-      }
-      function escapeAttr(value) { return escapeHtml(value).replace(/'/g, '&#039;'); }
-
-      document.getElementById('add-source').addEventListener('click', () => {
-        const name = document.getElementById('new-source-name').value.trim();
-        const url = document.getElementById('new-source-url').value.trim();
-        const reliability = Number(document.getElementById('new-source-reliability').value || 70);
-        if (!name || !url) {
-          status.textContent = 'Enter a source name and RSS URL.';
-          return;
-        }
-        state.sources.push({ id: `custom-${Date.now()}`, name, url, reliability: Math.max(0, Math.min(100, reliability)), enabled: true });
-        persistSources();
-        renderSources();
-        document.getElementById('new-source-name').value = '';
-        document.getElementById('new-source-url').value = '';
-        document.getElementById('new-source-reliability').value = '';
+      function escapeHtml(value){return String(value||'').replace(/[&<>"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]))}
+      function escapeAttr(value){return escapeHtml(value).replace(/'/g,'&#039;')}
+      document.getElementById('add-source').addEventListener('click',()=>{
+        const name=document.getElementById('new-source-name').value.trim();
+        const url=document.getElementById('new-source-url').value.trim();
+        const reliability=Number(document.getElementById('new-source-reliability').value||70);
+        if(!name||!url){status.textContent='Enter a source name and RSS URL.';return}
+        state.sources.push({id:`custom-${Date.now()}`,name,url,reliability:Math.max(0,Math.min(100,reliability)),enabled:true});
+        persistSources();renderSources();document.getElementById('new-source-name').value='';document.getElementById('new-source-url').value='';document.getElementById('new-source-reliability').value='';
       });
-
-      document.getElementById('new-session').addEventListener('click', () => {
-        for (let i = 0; i < 4; i += 1) {
-          document.getElementById(`scenario-${i}`).value = '';
-          document.getElementById(`signals-${i}`).value = '';
-        }
-        status.textContent = 'New session started.';
-        evidence.innerHTML = '';
-        renderEmptyResults();
+      document.getElementById('new-session').addEventListener('click',()=>{
+        for(let i=0;i<4;i+=1){document.getElementById(`scenario-${i}`).value='';const textarea=document.getElementById(`signals-${i}`);textarea.value='';autoGrow(textarea)}
+        status.textContent='New session started.';evidence.innerHTML='';renderEmptyResults();
       });
-
-      renderScenarios();
-      renderEmptyResults();
-      renderSources();
+      renderScenarios();renderEmptyResults();renderSources();
     })();
   </script>
 </body>
