@@ -1,20 +1,25 @@
 import Parser from "rss-parser";
 import OpenAI from "openai";
+import {
+  buildScenarioSearchQuery,
+  fetchTavilyArticles,
+  hostnameFromUrl
+} from "../lib/tavily-search.js";
 
 const parser = new Parser();
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 const DEFAULT_SOURCES = [
-  { id: "bbc-world", name: "BBC World", url: "http://feeds.bbci.co.uk/news/world/rss.xml", reliability: 82, enabled: true },
-  { id: "guardian-world", name: "Guardian World", url: "https://www.theguardian.com/world/rss", reliability: 78, enabled: true },
-  { id: "al-jazeera", name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml", reliability: 75, enabled: true },
-  { id: "ft-news", name: "Financial Times", url: "https://www.ft.com/news-feed?format=rss", reliability: 84, enabled: true },
-  { id: "google-news", name: "Google News", url: "https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en", reliability: 65, enabled: true }
+  { id: "bbc-world", name: "BBC World", url: "http://feeds.bbci.co.uk/news/world/rss.xml", reliability: 82, enabled: true, type: "rss" },
+  { id: "guardian-world", name: "Guardian World", url: "https://www.theguardian.com/world/rss", reliability: 78, enabled: true, type: "rss" },
+  { id: "al-jazeera", name: "Al Jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml", reliability: 75, enabled: true, type: "rss" },
+  { id: "ft-news", name: "Financial Times", url: "https://www.ft.com/news-feed?format=rss", reliability: 84, enabled: true, type: "rss" },
+  { id: "google-news", name: "Google News", url: "https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en", reliability: 65, enabled: true, type: "rss" }
 ];
 
 const MAX_SCENARIOS = 4;
 const MAX_SIGNALS_PER_SCENARIO = 12;
-const MAX_SOURCES = 12;
+const MAX_SOURCES = 20;
 const MAX_ITEMS_PER_SOURCE = 8;
 const MAX_ITEMS_FOR_MODEL = 24;
 const RSS_TIMEOUT_MS = 5000;
@@ -40,7 +45,7 @@ function normaliseUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   try {
-    const parsed = new URL(raw);
+    const parsed = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
     parsed.hash = "";
     return parsed.toString();
   } catch {
@@ -72,13 +77,22 @@ function sanitiseScenario(input, index) {
   };
 }
 
+function isTavilySource(source = {}) {
+  const type = String(source.type || "").trim().toLowerCase();
+  return ["web", "site", "domain", "tavily"].includes(type);
+}
+
 function sanitiseSource(input, index) {
-  const url = normaliseUrl(input?.url);
+  const url = normaliseUrl(input?.url || input?.homepage || input?.domain);
   if (!url) return null;
+  const type = cleanText(input?.type || "rss", 40).toLowerCase();
   return {
     id: cleanText(input?.id || `source-${index + 1}`, 80),
     name: cleanText(input?.name || new URL(url).hostname, 120),
     url,
+    homepage: normaliseUrl(input?.homepage || url),
+    domain: hostnameFromUrl(input?.domain || input?.homepage || url),
+    type,
     reliability: Math.max(0, Math.min(100, Number(input?.reliability ?? input?.reliability_percent ?? 70))),
     enabled: input?.enabled !== false
   };
@@ -106,6 +120,8 @@ function withTimeout(ms) {
 }
 
 async function fetchFeed(source) {
+  if (isTavilySource(source)) return [];
+
   const { signal, clear } = withTimeout(RSS_TIMEOUT_MS);
   try {
     const response = await fetch(source.url, {
@@ -127,11 +143,35 @@ async function fetchFeed(source) {
       title: cleanText(item.title, 220),
       snippet: cleanText(item.contentSnippet || item.summary || item.content || "", 360),
       url: item.link || source.url,
-      published_at: item.isoDate || item.pubDate || null
+      published_at: item.isoDate || item.pubDate || null,
+      searchProvider: "rss"
     }));
   } finally {
     clear();
   }
+}
+
+async function fetchCustomTavilyArticles({ source, scenarios }) {
+  const domain = source.domain || hostnameFromUrl(source.url || source.homepage);
+  if (!domain) return [];
+
+  const query = buildScenarioSearchQuery({ scenarios, extraTerms: [source.name, domain] }) || scenarios.map((scenario) => scenario.name).join(" OR ");
+  const articles = await fetchTavilyArticles({
+    query,
+    domains: [domain],
+    maxResults: MAX_ITEMS_PER_SOURCE,
+    useDefaultDomains: false
+  });
+
+  return articles.map((article) => ({
+    ...article,
+    source_id: source.id,
+    source: source.name,
+    source_url: source.url,
+    reliability: source.reliability,
+    published_at: article.published_at || article.isoDate || null,
+    searchProvider: "tavily"
+  }));
 }
 
 function scoreItemAgainstSignals(item, scenario) {
@@ -185,9 +225,6 @@ function heuristicAssessment(scenarios, articles, sources) {
 
     const signalCoverage = Math.round((matched.size / Math.max(1, scenario.signals.length)) * 100);
     const sourceSupport = Array.from(evidenceBySource.values()).reduce((sum, value) => sum + value, 0);
-
-    // Independent likelihood: do not normalize against other scenarios.
-    // Coverage is the main driver; multiple reliable sources can lift confidence, but the score is capped at 100.
     const likelihood = matched.size
       ? Math.min(100, Math.round((signalCoverage * 0.7) + (Math.min(100, sourceSupport) * 0.3)))
       : 0;
@@ -212,7 +249,7 @@ async function callModel({ scenarios, articles, sources }) {
   const prompt = JSON.stringify({
     instruction: "Estimate each user-defined scenario independently from 0-100 using only the selected source articles. Do not normalize the scores and do not make them sum to 100. A single scenario should not automatically be 100%; two scenarios should not automatically be 50/50. Score each scenario by evidence strength: 0 means no meaningful evidence in the selected sources, 50 means moderate evidence, and 100 means very strong/current evidence across multiple reliable sources. Report source relevance, source reliability, and weighting for each useful source. Do not invent evidence.",
     scenarios,
-    selected_sources: sources.map(({ id, name, url, reliability }) => ({ id, name, url, reliability_percent: reliability })),
+    selected_sources: sources.map(({ id, name, url, reliability, type, domain }) => ({ id, name, url, type, domain, reliability_percent: reliability })),
     articles: articles.map((article) => ({
       source_id: article.source_id,
       source: article.source,
@@ -221,6 +258,7 @@ async function callModel({ scenarios, articles, sources }) {
       snippet: article.snippet,
       url: article.url,
       published_at: article.published_at,
+      search_provider: article.searchProvider,
       matched_before_model: article.scenario_matches
     }))
   }, null, 2);
@@ -296,13 +334,21 @@ export default async function handler(req, res) {
       return sendJson(res, 400, { error: "Select at least one source." });
     }
 
-    const feedResults = await Promise.allSettled(sources.map(fetchFeed));
     const failed_sources = [];
     const articles = [];
+    const rssSources = sources.filter((source) => !isTavilySource(source));
+    const tavilySources = sources.filter(isTavilySource);
 
+    const feedResults = await Promise.allSettled(rssSources.map(fetchFeed));
     feedResults.forEach((result, index) => {
       if (result.status === "fulfilled") articles.push(...result.value);
-      else failed_sources.push({ name: sources[index].name, url: sources[index].url, error: result.reason?.message || "Fetch failed" });
+      else failed_sources.push({ name: rssSources[index].name, url: rssSources[index].url, error: result.reason?.message || "Fetch failed" });
+    });
+
+    const tavilyResults = await Promise.allSettled(tavilySources.map((source) => fetchCustomTavilyArticles({ source, scenarios })));
+    tavilyResults.forEach((result, index) => {
+      if (result.status === "fulfilled") articles.push(...result.value);
+      else failed_sources.push({ name: tavilySources[index].name, url: tavilySources[index].url, error: result.reason?.message || "Tavily search failed" });
     });
 
     const filteredArticles = prefilterArticles(articles, scenarios);
@@ -312,9 +358,17 @@ export default async function handler(req, res) {
       assessed_at: new Date().toISOString(),
       scenario_scores: assessment.scenario_scores || [],
       confidence: assessment.confidence || "low",
-      sources_used: sources.map(({ id, name, url, reliability }) => ({ id, name, url, reliability_percent: reliability, selected: true })),
+      sources_used: sources.map(({ id, name, url, reliability, type, domain }) => ({ id, name, url, type, domain, reliability_percent: reliability, selected: true })),
       failed_sources,
-      evidence_articles: filteredArticles.map(({ source, title, url, published_at, scenario_matches }) => ({ source, title, url, published_at, scenario_matches }))
+      evidence_articles: filteredArticles.map(({ source, title, url, published_at, scenario_matches, searchProvider }) => ({ source, title, url, published_at, scenario_matches, searchProvider })),
+      source_diagnostics: {
+        rss_source_count: rssSources.length,
+        tavily_source_count: tavilySources.length,
+        total_articles_collected: articles.length,
+        evidence_articles_after_filter: filteredArticles.length,
+        tavily_articles_collected: articles.filter((article) => article.searchProvider === "tavily").length,
+        tavily_evidence_after_filter: filteredArticles.filter((article) => article.searchProvider === "tavily").length
+      }
     });
   } catch (error) {
     console.error("Custom scenario assessment failed:", error);
