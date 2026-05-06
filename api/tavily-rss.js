@@ -34,13 +34,14 @@ export default async function handler(req, res) {
     const domain = normaliseDomain(req.query.domain || "");
     const q = String(req.query.q || "").trim();
     const query = q || buildScenarioSearchQuery({ topic, extraTerms: [topic] }) || topic;
-    const limit = Number(req.query.limit || 12);
+    const limit = Number(req.query.limit || 4);
 
     const articles = await fetchTavilyArticles({
       query,
       domains: domain ? [domain] : [],
       maxResults: limit,
-      useDefaultDomains: !domain
+      useDefaultDomains: !domain,
+      searchDepth: "basic"
     });
 
     res.setHeader("X-FSP-Tavily-Domain", domain || "default");
