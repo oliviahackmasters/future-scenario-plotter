@@ -421,6 +421,9 @@
       background:rgba(255,255,255,0.02);
       padding:14px;
       margin:14px 0;
+      width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
     }
 
     #hmScenarioPlotter .hm-timeline-summary{
@@ -455,12 +458,15 @@
       border:1px solid rgba(255,255,255,0.3);
     }
 
-    #hmScenarioPlotter .hm-timeline-graph{
-      width:100%;
-      overflow:hidden;
-      border:1px solid rgba(209,128,87,0.45);
-      background:rgba(255,255,255,0.01);
-    }
+
+
+#hmScenarioPlotter .hm-timeline-graph {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 720 / 280;
+}
 
     #hmScenarioPlotter .hm-timeline-graph svg{
       display:block;
@@ -883,7 +889,7 @@
           <span class="hm-badge">Hackmasters</span>
           <span>Future Scenario Plotter</span>
         </div>
-        <div class="hm-status" id="hmStatus">Loading latest assessment</div>
+        
       </div>
 
       <p class="hm-sub">
@@ -891,35 +897,11 @@
       </p>
        <section class="hm-card">
       <button class="hm-btn" id="hmRefreshBtn">Refresh analysis</button>
-  <div class="hm-source-manager">
-    <div class="hm-source-manager-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-      <div class="hm-msg-title">Manage Sources</div>
-      <button class="hm-btn hm-source-toggle-btn" id="hmSourceManagerToggle" type="button">Hide sources</button>
-    </div>
-
-    <div class="hm-source-form">
-  <input
-    class="hm-source-input"
-    id="hmSourceName"
-    placeholder="Source name, e.g. Reuters"
-  />
-  <input
-    class="hm-source-input"
-    id="hmSourceWebsite"
-    placeholder="Website URL or RSS feed URL, e.g. https://rss.cnn.com/rss/edition_world.rss"
-  />
-  <button class="hm-btn" id="hmAddSourceBtn">Find source</button>
-</div>
-
-<div class="hm-note" id="hmSourceDiscoveryStatus"></div>
-
-
-            <div class="hm-saved-sources" id="hmSavedSources"></div>
-            <div class="hm-built-in-sources" id="hmBuiltInSources"></div>
-</div>
+      <div class="hm-status" id="hmStatus">Loading latest assessment</div>
 </section>
+<br>
 
-<div class="hm-top-grid">
+
   <section class="hm-card">
     <div class="hm-msg-title">Scenario likelihoods</div>
 
@@ -934,13 +916,17 @@
       <div class="hm-timeline-summary" id="hmTimelineSummary">Latest daily trend for core scenario probabilities.</div>
       <div class="hm-timeline-legend" id="hmTimelineLegend"></div>
       <div class="hm-timeline-graph" id="hmTimelineGraph">
-        <svg viewBox="0 0 720 280" preserveAspectRatio="none"></svg>
+        <svg viewBox="0 0 720 280" preserveAspectRatio="xMidYMid meet"></svg>
       </div>
     </div>
 
     <div class="hm-results-grid" id="hmScenarioGrid"></div>
 
     <div class="hm-row">
+          <div class="hm-msg-title">Combined assessment</div>
+    <div class="hm-msg-body" id="hmNarrative">
+      <p>Loading combined assessment.</p>
+    </div>
       <button class="hm-btn" id="hmCalcToggleBtn">How was this calculated?</button>
     </div>
 
@@ -980,25 +966,45 @@
     </div>
   </section>
 
-  <section class="hm-card">
-    <div class="hm-msg-title">Combined assessment</div>
-    <div class="hm-msg-body" id="hmNarrative">
-      <p>Loading combined assessment.</p>
-    </div>
 
-    <div class="hm-row">
+      <section class="hm-card">
+        <div class="hm-msg-title">Tracked signals</div>
+        <div class="hm-signals" id="hmSignalTable"></div>
+      </section>
+
+      <section class="hm-card">
+        <div class="hm-source-manager">
+          <div class="hm-source-manager-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div class="hm-msg-title">Manage Sources</div>
+            <button class="hm-btn hm-source-toggle-btn" id="hmSourceManagerToggle" type="button">Hide sources</button>
+          </div>
+
+          <div class="hm-source-form">
+            <input
+              class="hm-source-input"
+              id="hmSourceName"
+              placeholder="Source name, e.g. Reuters"
+            />
+            <input
+              class="hm-source-input"
+              id="hmSourceWebsite"
+              placeholder="Website URL or RSS feed URL, e.g. https://rss.cnn.com/rss/edition_world.rss"
+            />
+            <button class="hm-btn" id="hmAddSourceBtn">Find source</button>
+          </div>
+
+          <div class="hm-note" id="hmSourceDiscoveryStatus"></div>
+          <div class="hm-saved-sources" id="hmSavedSources"></div>
+          <div class="hm-built-in-sources" id="hmBuiltInSources"></div>
+        </div>
+
+        <div class="hm-row">
       <button class="hm-btn" id="hmSourcesBtn">Show sources</button>
     </div>
 
     <div class="hm-sources" id="hmSources" style="display:none"></div>
     <div class="hm-note">Demo output only. Analyst review required for high-stakes decisions.</div>
     <div class="hm-error" id="hmError"></div>
-  </section>
-</div>
-
-      <section class="hm-card">
-        <div class="hm-msg-title">Tracked signals</div>
-        <div class="hm-signals" id="hmSignalTable"></div>
       </section>
     </div>
   </div>
