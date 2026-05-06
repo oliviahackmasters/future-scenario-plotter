@@ -304,7 +304,9 @@
           const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenarios,sources:selectedSources})});
           const data=await response.json();
           if(!response.ok)throw new Error(data.error||'Assessment failed');
-          state.latest=data;renderAssessment(data,scenarios);status.textContent=`Assessment complete. Confidence: ${data.confidence||'low'}.`;
+          state.latest=data;renderAssessment(data,scenarios);
+          console.log('SCENARIO DEBUG', data.debug);
+          status.textContent=`Assessment complete. Confidence: ${data.confidence||'low'}.`;
         }catch(error){status.textContent=error.message||'Assessment failed.'}finally{go.disabled=false;postHeight()}
       }
       function renderAssessment(data,scenarios){
