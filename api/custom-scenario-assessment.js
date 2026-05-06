@@ -93,13 +93,32 @@ function totalSignalWeight(scenario = {}) {
   return getWeightedSignals(scenario).reduce((sum, signal) => sum + signal.weight, 0) || 1;
 }
 
+function containsImplementationDetails(value) {
+  return [
+    /\btavily\b/i,
+    /\bopenai\b/i,
+    /\bgpt[-\w.]*\b/i,
+    /\bllm\b/i,
+    /\bai\b/i,
+    /\bmodel\b/i,
+    /\bfallback\b/i,
+    /\bsearch provider\b/i,
+    /\bsearch_provider\b/i,
+    /\brss parser\b/i,
+    /\bapi\b/i,
+    /\bbackend\b/i,
+    /\bprompt\b/i,
+    /\btoken\b/i,
+    /\btimeout\b/i,
+    /\btimed out\b/i
+  ].some((pattern) => pattern.test(value));
+}
+
 function scrubImplementationDetails(value, fallback = "Not enough evidence found to support this scenario.") {
   const raw = cleanText(value, 1400);
   if (!raw) return fallback;
 
-  const lower = raw.toLowerCase();
-  const banned = ["tavily", "openai", "gpt", "model", "ai", "llm", "fallback", "search provider", "search_provider", "rss parser", "api", "backend", "prompt", "token", "timeout", "timed out"];
-  if (banned.some((term) => lower.includes(term))) return fallback;
+  if (containsImplementationDetails(raw)) return fallback;
 
   return raw
     .replace(/\bTavily\b/gi, "the selected sources")
