@@ -30,8 +30,8 @@ const RSS_FETCH_TIMEOUT_MS        = 3500;
 const JSON_FETCH_TIMEOUT_MS       = 8000;
 const OPENAI_TIMEOUT_FALLBACK_MS  = 22000;
 const MAX_ITEMS_PER_FEED          = 8;   // was 6
-const MAX_ARTICLES_FOR_MODEL      = 5;   // was 3
-const MAX_FILTERED_ITEMS          = 8;   // was 5
+const MAX_ARTICLES_FOR_MODEL      = 12;
+const MAX_FILTERED_ITEMS          = 24;
 const MIN_MATCHES_REQUIRED        = 2;
 
 // ── Topic Configurations ───────────────────────────────────────────────────────
