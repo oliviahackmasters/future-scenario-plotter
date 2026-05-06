@@ -39,7 +39,8 @@ export default async function handler(req, res) {
     const articles = await fetchTavilyArticles({
       query,
       domains: domain ? [domain] : [],
-      maxResults: limit
+      maxResults: limit,
+      useDefaultDomains: !domain
     });
 
     res.setHeader("X-FSP-Tavily-Domain", domain || "default");
