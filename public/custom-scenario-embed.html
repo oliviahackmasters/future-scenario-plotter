@@ -15,29 +15,24 @@
     #hmScenarioPlotter .hm-badge{display:inline-block;border:1px solid var(--hm-copper);padding:6px 10px;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;font-size:12px;color:var(--hm-copper)}
     #hmScenarioPlotter .hm-status{font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:rgba(255,255,255,.85);border:1px solid rgba(209,128,87,.55);padding:8px 10px;min-height:36px;display:flex;align-items:center}
     #hmScenarioPlotter .hm-sub{margin:0 0 14px;font-size:12px;line-height:1.5;color:rgba(255,255,255,.85);max-width:900px}
-    #hmScenarioPlotter .hm-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px}
-    #hmScenarioPlotter .hm-button-row{display:flex;flex-wrap:wrap;gap:9px}
     #hmScenarioPlotter button{appearance:none;cursor:pointer;background:var(--hm-black);color:var(--hm-white);border:1px solid var(--hm-copper);border-radius:0;padding:11px 14px;min-height:42px;font:inherit;font-size:12px;font-weight:700;letter-spacing:.9px;text-transform:uppercase}
     #hmScenarioPlotter button:hover{background:rgba(209,128,87,.12)}
     #hmScenarioPlotter button:disabled{opacity:.55;cursor:wait}
     #hmScenarioPlotter .primary{background:var(--hm-copper);color:var(--hm-black);border-color:var(--hm-copper)}
-    #hmScenarioPlotter .primary:hover{background:var(--hm-copper);filter:brightness(1.05)}
     #hmScenarioPlotter input,#hmScenarioPlotter textarea{width:100%;background:var(--hm-black);color:var(--hm-white);border:1px solid var(--hm-copper);border-radius:0;outline:none;padding:12px 14px;min-height:44px;font:inherit;font-size:13px;line-height:1.45}
     #hmScenarioPlotter textarea{resize:none;overflow:hidden;min-height:44px;height:auto}
     #hmScenarioPlotter input::placeholder,#hmScenarioPlotter textarea::placeholder{color:rgba(255,255,255,.55);opacity:1}
-
-    /* Short-name column + equal-width scenario and signal columns, with fixed generate button. */
+    #hmScenarioPlotter .hm-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px}
     #hmScenarioPlotter .scenario-grid{display:grid;grid-template-columns:minmax(130px,.35fr) minmax(0,1fr) minmax(0,1fr) 118px;gap:12px;margin:0 0 14px;width:100%;min-width:0;align-items:stretch}
     #hmScenarioPlotter .scenario-row{display:contents}
     #hmScenarioPlotter .go{grid-column:4;grid-row:1 / span 4;min-height:212px}
-
     #hmScenarioPlotter .hm-card,#hmScenarioPlotter .result-card,#hmScenarioPlotter .source-line,#hmScenarioPlotter .sources-title,#hmScenarioPlotter .source-editor,#hmScenarioPlotter .evidence{border:1px solid var(--hm-copper);background:rgba(255,255,255,.01);padding:14px;min-width:0}
     #hmScenarioPlotter .section-label,#hmScenarioPlotter .source-editor summary,#hmScenarioPlotter .result-card strong{margin:0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--hm-white)}
     #hmScenarioPlotter .results{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;width:100%;max-width:100%;min-width:0;margin:0 0 14px}
     #hmScenarioPlotter .result-card{min-height:120px;display:flex;align-items:flex-start;justify-content:flex-start;text-align:left;color:var(--hm-white);overflow-wrap:anywhere;word-break:break-word}
     #hmScenarioPlotter .result-card span,#hmScenarioPlotter .result-card p{font-size:13px;line-height:1.5;margin:0 0 8px}
     #hmScenarioPlotter .sources{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:12px;margin:0 0 14px;width:100%;min-width:0}
-    #hmScenarioPlotter .sources-title{grid-column:1 / -1;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px}
+    #hmScenarioPlotter .sources-title{grid-column:1 / -1;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;min-height:52px}
     #hmScenarioPlotter .source-line{color:rgba(255,255,255,.9);font-size:13px;line-height:1.45;display:flex;align-items:center;min-height:52px}
     #hmScenarioPlotter .source-toggle.off{color:rgba(255,255,255,.45);border-color:rgba(209,128,87,.45);background:rgba(255,255,255,.04)}
     #hmScenarioPlotter .source-editor{margin:0 0 14px}
@@ -45,11 +40,11 @@
     #hmScenarioPlotter .source-editor summary::-webkit-details-marker{display:none}
     #hmScenarioPlotter .source-editor-grid{margin-top:12px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,2fr) 90px auto;gap:12px}
     #hmScenarioPlotter .status{margin:0 0 14px;font-size:12px;line-height:1.5;color:rgba(255,255,255,.78);text-transform:uppercase;letter-spacing:.8px}
-    #hmScenarioPlotter .evidence{margin:0;max-height:260px;overflow:auto;color:rgba(255,255,255,.9);font-size:13px;line-height:1.5}
+    #hmScenarioPlotter .evidence{margin:0 0 14px;max-height:300px;overflow:auto;color:rgba(255,255,255,.9);font-size:13px;line-height:1.5}
     #hmScenarioPlotter .evidence:empty{display:none}
     #hmScenarioPlotter .evidence a{color:var(--hm-white);text-decoration:underline;text-decoration-color:var(--hm-copper)}
     #hmScenarioPlotter .small{font-size:12px;line-height:1.5;color:rgba(255,255,255,.62);font-weight:400;text-transform:none;letter-spacing:0;margin:8px 0 0}
-    @media(max-width:1100px){#hmScenarioPlotter .scenario-grid{grid-template-columns:minmax(115px,.35fr) minmax(0,1fr) minmax(0,1fr) 110px}}
+    #hmScenarioPlotter .evidence-item{border-top:1px solid rgba(209,128,87,.45);padding:10px 0 0;margin:10px 0 0}
     @media(max-width:900px){#hmScenarioPlotter .scenario-grid{grid-template-columns:1fr}#hmScenarioPlotter .scenario-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}#hmScenarioPlotter .go{grid-column:auto;grid-row:auto;min-height:44px}#hmScenarioPlotter .results{grid-template-columns:repeat(2,minmax(0,1fr))}#hmScenarioPlotter .sources,#hmScenarioPlotter .source-editor-grid{grid-template-columns:1fr}}
     @media(max-width:560px){#hmScenarioPlotter .hm-wrap{padding:14px}#hmScenarioPlotter .scenario-row,#hmScenarioPlotter .results{grid-template-columns:1fr}}
   </style>
@@ -62,10 +57,12 @@
         <div class="hm-status">Done</div>
       </div>
       <p class="hm-sub">Enter scenarios, add signal lists, and ask questions grounded in selected feeds and Tavily web domains.</p>
-      <div class="hm-toolbar"><div class="hm-button-row"><button type="button" id="new-session">New session</button></div></div>
+      <div class="hm-toolbar"><button type="button" id="new-session">New session</button></div>
       <div class="scenario-grid" id="scenario-grid"></div>
       <div class="results" id="results"></div>
-      <div class="sources" id="sources"></div>
+
+      <div class="sources" id="available-sources"></div>
+
       <details class="source-editor hm-card">
         <summary>Add Tavily source / domain</summary>
         <div class="source-editor-grid">
@@ -76,8 +73,9 @@
         </div>
         <p class="small">Custom sources are searched through Tavily by domain/site. Enter a domain such as bellingcat.com, x.com, threads.net, or a full website URL.</p>
       </details>
+
       <div class="status" id="status"></div>
-      <div class="evidence" id="evidence"></div>
+      <div class="evidence" id="evidence-used"></div>
     </div>
   </div>
 
@@ -95,11 +93,13 @@
       const state={sources:JSON.parse(localStorage.getItem('fsp-custom-sources')||'null')||defaultSources,latest:null};
       const scenarioGrid=document.getElementById('scenario-grid');
       const results=document.getElementById('results');
-      const sources=document.getElementById('sources');
+      const availableSources=document.getElementById('available-sources');
       const status=document.getElementById('status');
-      const evidence=document.getElementById('evidence');
+      const evidenceUsed=document.getElementById('evidence-used');
 
       function autoGrow(el){el.style.height='auto';el.style.height=el.scrollHeight+'px'}
+      function reliabilityPct(source){const n=Number(source.reliability??source.reliability_percent??70);return Math.round(n<=1?n*100:n)}
+      function sourceTypeLabel(source){return source.type==='web'?'Tavily domain':'RSS feed'}
       function renderScenarios(){
         scenarioGrid.innerHTML='';
         for(let i=0;i<4;i+=1){
@@ -129,21 +129,24 @@
           results.appendChild(card);
         }
       }
-      function renderSources(sourceWeightsByName){
-        sources.innerHTML='<div class="sources-title hm-card"><span class="section-label">Sources used</span><button type="button">Show</button></div>';
+      function renderAvailableSources(){
+        const enabledCount=state.sources.filter(source=>source.enabled).length;
+        availableSources.innerHTML=`<div class="sources-title hm-card"><div><div class="section-label">Available sources to search</div><p class="small">${enabledCount} of ${state.sources.length} selected. This is the source pool, not the final evidence list.</p></div></div>`;
         state.sources.forEach((source,index)=>{
-          const weight=sourceWeightsByName?.get(source.name);
-          const sourceKind=source.type==='web'?'Tavily domain':'feed';
           const line=document.createElement('div');
           line.className='source-line hm-card';
-          line.textContent=weight?`${source.name}: relevancy ${Math.round(weight.relevance_percent)}% reliability ${Math.round(weight.reliability_percent)}% = weighting ${Math.round(weight.weighting_percent)}%`:`${source.name}: ${sourceKind}, reliability ${source.reliability}%`;
+          line.textContent=`${source.name}: ${sourceTypeLabel(source)}, reliability ${reliabilityPct(source)}%`;
           const toggle=document.createElement('button');
           toggle.className='source-toggle'+(source.enabled?'':' off');
           toggle.type='button';
-          toggle.textContent=source.enabled?'Select / deselect':'Deselected';
-          toggle.addEventListener('click',()=>{state.sources[index].enabled=!state.sources[index].enabled;persistSources();renderSources(sourceWeightsByName)});
-          sources.appendChild(line);sources.appendChild(toggle);
+          toggle.textContent=source.enabled?'Selected':'Deselected';
+          toggle.addEventListener('click',()=>{state.sources[index].enabled=!state.sources[index].enabled;persistSources();renderAvailableSources()});
+          availableSources.appendChild(line);availableSources.appendChild(toggle);
         });
+      }
+      function renderEvidenceUsed(data){
+        const articles=(data.evidence_articles||[]).slice(0,12);
+        evidenceUsed.innerHTML=`<div class="section-label">Evidence used in prediction</div><p class="small">These are the articles that survived filtering and were supplied as evidence for the assessment.</p>` + (articles.length?articles.map(article=>`<div class="evidence-item"><strong>${escapeHtml(article.source)}</strong>: <a href="${escapeAttr(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></div>`).join(''):'<div class="evidence-item">No evidence articles were returned for this assessment.</div>');
       }
       function persistSources(){localStorage.setItem('fsp-custom-sources',JSON.stringify(state.sources))}
       function collectScenarios(){
@@ -165,7 +168,7 @@
         const selectedSources=state.sources.filter(source=>source.enabled);
         if(!selectedSources.length){status.textContent='Select at least one feed or Tavily domain.';return}
         const go=document.getElementById('go');
-        go.disabled=true;status.textContent='Scanning selected feeds and Tavily domains...';evidence.innerHTML='';
+        go.disabled=true;status.textContent='Scanning selected feeds and Tavily domains...';evidenceUsed.innerHTML='';
         try{
           const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenarios,sources:selectedSources})});
           const data=await response.json();
@@ -182,20 +185,15 @@
           const score=byName.get(scenario.name)||data.scenario_scores?.[i];
           card.innerHTML=`<span><strong>${escapeHtml(scenario.name)}</strong><br>${Math.round(score?.likelihood_percent||0)}%<br><span class="small">${escapeHtml(score?.rationale||'')}</span></span>`;
         }
-        const sourceWeightsByName=new Map();
-        (data.scenario_scores||[]).forEach(score=>(score.source_weights||[]).forEach(weight=>{const existing=sourceWeightsByName.get(weight.name);if(!existing||weight.weighting_percent>existing.weighting_percent)sourceWeightsByName.set(weight.name,weight)}));
-        renderSources(sourceWeightsByName);
-        evidence.innerHTML=(data.evidence_articles||[]).slice(0,6).map(article=>`<div><strong>${escapeHtml(article.source)}</strong>: <a href="${escapeAttr(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></div>`).join('');
+        renderAvailableSources();
+        renderEvidenceUsed(data);
       }
       function escapeHtml(value){return String(value||'').replace(/[&<>"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]))}
       function escapeAttr(value){return escapeHtml(value).replace(/'/g,'&#039;')}
       function normaliseDomainInput(value){
         const raw=String(value||'').trim();
         if(!raw)return null;
-        try{
-          const parsed=new URL(raw.startsWith('http')?raw:`https://${raw}`);
-          return parsed.hostname.replace(/^www\./,'').toLowerCase();
-        }catch{return null}
+        try{const parsed=new URL(raw.startsWith('http')?raw:`https://${raw}`);return parsed.hostname.replace(/^www\./,'').toLowerCase()}catch{return null}
       }
       document.getElementById('add-source').addEventListener('click',()=>{
         const name=document.getElementById('new-source-name').value.trim();
@@ -204,13 +202,13 @@
         const reliability=Number(document.getElementById('new-source-reliability').value||70);
         if(!name||!domain){status.textContent='Enter a source name and domain or website URL.';return}
         state.sources.push({id:`custom-web-${Date.now()}`,name,url:`https://${domain}`,homepage:`https://${domain}`,type:'web',reliability:Math.max(0,Math.min(100,reliability)),enabled:true});
-        persistSources();renderSources();document.getElementById('new-source-name').value='';document.getElementById('new-source-url').value='';document.getElementById('new-source-reliability').value='';status.textContent=`Added Tavily source domain: ${domain}.`;
+        persistSources();renderAvailableSources();document.getElementById('new-source-name').value='';document.getElementById('new-source-url').value='';document.getElementById('new-source-reliability').value='';status.textContent=`Added Tavily source domain: ${domain}.`;
       });
       document.getElementById('new-session').addEventListener('click',()=>{
         for(let i=0;i<4;i+=1){document.getElementById(`scenario-name-${i}`).value='';document.getElementById(`scenario-${i}`).value='';const textarea=document.getElementById(`signals-${i}`);textarea.value='';autoGrow(textarea)}
-        status.textContent='New session started.';evidence.innerHTML='';renderEmptyResults();
+        status.textContent='New session started.';evidenceUsed.innerHTML='';renderEmptyResults();
       });
-      renderScenarios();renderEmptyResults();renderSources();
+      renderScenarios();renderEmptyResults();renderAvailableSources();
     })();
   </script>
 </body>
