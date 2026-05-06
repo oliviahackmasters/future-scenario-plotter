@@ -74,7 +74,7 @@
           <input id="new-source-reliability" placeholder="70" inputmode="numeric" />
           <button id="add-source" type="button">Add</button>
         </div>
-        <p class="small">Custom sources are searched through Tavily by domain/site. Enter a domain such as bellingcat.com, x.com, threads.net, or a full website URL.</p>
+        <p class="small">Custom sources are saved globally for this plotter and searched through Tavily by domain/site.</p>
       </details>
 
       <div class="status" id="status"></div>
@@ -88,15 +88,18 @@
   <script>
     (function(){
       const API_BASE=new URLSearchParams(location.search).get('api')||location.origin;
-      const API_URL=API_BASE.replace(/\/$/,'')+'/api/custom-scenario-assessment';
+      const API_ROOT=API_BASE.replace(/\/$/,'');
+      const API_URL=API_ROOT+'/api/custom-scenario-assessment';
+      const SOURCES_TOPIC=new URLSearchParams(location.search).get('sourcesTopic')||'custom';
+      const SOURCES_URL=API_ROOT+'/api/sources?topic='+encodeURIComponent(SOURCES_TOPIC);
       const defaultSources=[
-        {id:'bbc-world',name:'BBC World',url:'http://feeds.bbci.co.uk/news/world/rss.xml',reliability:82,enabled:true,type:'rss'},
-        {id:'guardian-world',name:'Guardian World',url:'https://www.theguardian.com/world/rss',reliability:78,enabled:true,type:'rss'},
-        {id:'al-jazeera',name:'Al Jazeera',url:'https://www.aljazeera.com/xml/rss/all.xml',reliability:75,enabled:true,type:'rss'},
-        {id:'ft-news',name:'Financial Times',url:'https://www.ft.com/news-feed?format=rss',reliability:84,enabled:true,type:'rss'},
-        {id:'google-news',name:'Google News',url:'https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en',reliability:65,enabled:true,type:'rss'}
+        {id:'bbc-world',name:'BBC World',url:'http://feeds.bbci.co.uk/news/world/rss.xml',reliability:82,enabled:true,type:'rss',locked:true},
+        {id:'guardian-world',name:'Guardian World',url:'https://www.theguardian.com/world/rss',reliability:78,enabled:true,type:'rss',locked:true},
+        {id:'al-jazeera',name:'Al Jazeera',url:'https://www.aljazeera.com/xml/rss/all.xml',reliability:75,enabled:true,type:'rss',locked:true},
+        {id:'ft-news',name:'Financial Times',url:'https://www.ft.com/news-feed?format=rss',reliability:84,enabled:true,type:'rss',locked:true},
+        {id:'google-news',name:'Google News',url:'https://news.google.com/rss?hl=en-GB&gl=GB&ceid=GB:en',reliability:65,enabled:true,type:'rss',locked:true}
       ];
-      const state={sources:JSON.parse(localStorage.getItem('fsp-custom-sources')||'null')||defaultSources,latest:null};
+      const state={sources:[...defaultSources],latest:null,sourceStoreAvailable:true};
       const scenarioGrid=document.getElementById('scenario-grid');
       const results=document.getElementById('results');
       const availableSources=document.getElementById('available-sources');
@@ -109,8 +112,67 @@
       }
       function autoGrow(el){el.style.height='auto';el.style.height=el.scrollHeight+'px';postHeight()}
       function autoGrowAll(){document.querySelectorAll('#hmScenarioPlotter textarea').forEach(autoGrow);postHeight()}
-      function reliabilityPct(source){const n=Number(source.reliability??source.reliability_percent??70);return Math.round(n<=1?n*100:n)}
+      function reliabilityPct(source){const n=Number(source.reliability??source.reliability_percent??source.confidence??70);return Math.round(n<=1?n*100:n)}
       function sourceTypeLabel(source){return source.type==='web'?'Tavily domain':'RSS feed'}
+      function normaliseBackendSource(source){
+        const confidence=Number(source.confidence??source.reliability??source.reliability_percent??70);
+        return {
+          ...source,
+          reliability: confidence<=1?Math.round(confidence*100):confidence,
+          type: source.type || 'web',
+          enabled: source.enabled !== false,
+          remote: true
+        };
+      }
+      function dedupeSources(sources){
+        const byKey=new Map();
+        sources.forEach((source)=>{
+          const key=String(source.url||source.homepage||source.name||'').toLowerCase();
+          if(key && !byKey.has(key)) byKey.set(key,source);
+        });
+        return Array.from(byKey.values());
+      }
+      async function loadGlobalSources(){
+        try{
+          const response=await fetch(SOURCES_URL,{method:'GET',headers:{'Accept':'application/json'}});
+          if(!response.ok)throw new Error('Sources API unavailable');
+          const data=await response.json();
+          const saved=[...(data.global||[]),...(data.topic||[])].map(normaliseBackendSource);
+          state.sources=dedupeSources([...defaultSources,...saved]);
+          state.sourceStoreAvailable=true;
+          renderAvailableSources();
+          status.textContent=saved.length?`Loaded ${saved.length} global custom source(s).`:status.textContent;
+        }catch(error){
+          state.sourceStoreAvailable=false;
+          const local=JSON.parse(localStorage.getItem('fsp-custom-sources')||'null');
+          state.sources=Array.isArray(local)?dedupeSources([...defaultSources,...local]):[...defaultSources];
+          renderAvailableSources();
+          status.textContent='Using browser-local sources because the global source store is unavailable.';
+        }finally{postHeight()}
+      }
+      async function saveGlobalSource(source){
+        const response=await fetch(SOURCES_URL,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            name:source.name,
+            url:source.url,
+            homepage:source.homepage||source.url,
+            type:source.type||'web',
+            enabled:source.enabled!==false,
+            confidence:Number(source.reliability??70)/100,
+            discovered_by:source.discovered_by||'custom_tavily_domain',
+            validated_at:new Date().toISOString()
+          })
+        });
+        const data=await response.json();
+        if(!response.ok)throw new Error(data.message||data.error||'Could not save source globally');
+        return data.sources||[];
+      }
+      async function updateGlobalSource(source){
+        if(!source.remote||!source.id)return;
+        await fetch(SOURCES_URL,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:source.id,enabled:source.enabled})});
+      }
       function renderScenarios(){
         scenarioGrid.innerHTML='';
         for(let i=0;i<4;i+=1){
@@ -145,7 +207,7 @@
       }
       function renderAvailableSources(){
         const enabledCount=state.sources.filter(source=>source.enabled).length;
-        availableSources.innerHTML=`<div class="sources-title hm-card"><div><div class="section-label">Available sources to search</div><p class="small">${enabledCount} of ${state.sources.length} selected. This is the source pool, not the final evidence list.</p></div></div>`;
+        availableSources.innerHTML=`<div class="sources-title hm-card"><div><div class="section-label">Available sources to search</div><p class="small">${enabledCount} of ${state.sources.length} selected. Custom Tavily sources are global, not per-device.</p></div></div>`;
         state.sources.forEach((source,index)=>{
           const line=document.createElement('div');
           line.className='source-line hm-card';
@@ -154,7 +216,12 @@
           toggle.className='source-toggle'+(source.enabled?'':' off');
           toggle.type='button';
           toggle.textContent=source.enabled?'Selected':'Deselected';
-          toggle.addEventListener('click',()=>{state.sources[index].enabled=!state.sources[index].enabled;persistSources();renderAvailableSources()});
+          toggle.addEventListener('click',async()=>{
+            state.sources[index].enabled=!state.sources[index].enabled;
+            if(state.sourceStoreAvailable) await updateGlobalSource(state.sources[index]);
+            else localStorage.setItem('fsp-custom-sources',JSON.stringify(state.sources.filter(item=>!item.locked)));
+            renderAvailableSources();
+          });
           availableSources.appendChild(line);availableSources.appendChild(toggle);
         });
         postHeight();
@@ -164,7 +231,6 @@
         evidenceUsed.innerHTML=`<div class="section-label">Evidence used in prediction</div><p class="small">These are the articles that survived filtering and were supplied as evidence for the assessment.</p>` + (articles.length?articles.map(article=>`<div class="evidence-item"><strong>${escapeHtml(article.source)}</strong>: <a href="${escapeAttr(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></div>`).join(''):'<div class="evidence-item">No evidence articles were returned for this assessment.</div>');
         postHeight();
       }
-      function persistSources(){localStorage.setItem('fsp-custom-sources',JSON.stringify(state.sources))}
       function collectScenarios(){
         const scenarios=[];
         for(let i=0;i<4;i+=1){
@@ -212,14 +278,26 @@
         if(!raw)return null;
         try{const parsed=new URL(raw.startsWith('http')?raw:`https://${raw}`);return parsed.hostname.replace(/^www\./,'').toLowerCase()}catch{return null}
       }
-      document.getElementById('add-source').addEventListener('click',()=>{
+      document.getElementById('add-source').addEventListener('click',async()=>{
         const name=document.getElementById('new-source-name').value.trim();
         const rawDomain=document.getElementById('new-source-url').value.trim();
         const domain=normaliseDomainInput(rawDomain);
         const reliability=Number(document.getElementById('new-source-reliability').value||70);
         if(!name||!domain){status.textContent='Enter a source name and domain or website URL.';postHeight();return}
-        state.sources.push({id:`custom-web-${Date.now()}`,name,url:`https://${domain}`,homepage:`https://${domain}`,type:'web',reliability:Math.max(0,Math.min(100,reliability)),enabled:true});
-        persistSources();renderAvailableSources();document.getElementById('new-source-name').value='';document.getElementById('new-source-url').value='';document.getElementById('new-source-reliability').value='';status.textContent=`Added Tavily source domain: ${domain}.`;postHeight();
+        const source={id:`custom-web-${Date.now()}`,name,url:`https://${domain}`,homepage:`https://${domain}`,type:'web',reliability:Math.max(0,Math.min(100,reliability)),enabled:true,discovered_by:'custom_tavily_domain'};
+        try{
+          if(state.sourceStoreAvailable){
+            const saved=await saveGlobalSource(source);
+            state.sources=dedupeSources([...defaultSources,...saved.map(normaliseBackendSource)]);
+            status.textContent=`Added global Tavily source domain: ${domain}.`;
+          }else{
+            state.sources.push(source);
+            localStorage.setItem('fsp-custom-sources',JSON.stringify(state.sources.filter(item=>!item.locked)));
+            status.textContent=`Added browser-local Tavily source domain: ${domain}.`;
+          }
+          renderAvailableSources();
+          document.getElementById('new-source-name').value='';document.getElementById('new-source-url').value='';document.getElementById('new-source-reliability').value='';
+        }catch(error){status.textContent=error.message||'Could not save source globally.'}finally{postHeight()}
       });
       document.getElementById('new-session').addEventListener('click',()=>{
         for(let i=0;i<4;i+=1){document.getElementById(`scenario-name-${i}`).value='';document.getElementById(`scenario-${i}`).value='';const textarea=document.getElementById(`signals-${i}`);textarea.value='';autoGrow(textarea)}
@@ -227,7 +305,7 @@
       });
       if('ResizeObserver' in window){new ResizeObserver(()=>postHeight()).observe(document.getElementById('hmScenarioPlotter'))}
       window.addEventListener('load',()=>{autoGrowAll();postHeight()});
-      renderScenarios();renderEmptyResults();renderAvailableSources();postHeight();
+      renderScenarios();renderEmptyResults();renderAvailableSources();loadGlobalSources();postHeight();
     })();
   </script>
 </body>
