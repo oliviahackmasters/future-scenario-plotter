@@ -24,6 +24,7 @@ const OPENAI_TIMEOUT_MS = 24000;
 const ALLOWED_SIGNAL_WEIGHTS = new Set([3, 6, 9]);
 const DEFAULT_SIGNAL_WEIGHT = 3;
 const MIN_CONTEXTLESS_SIGNAL_WEIGHT = 9;
+const MAX_MODEL_SCORE_ABOVE_CALIBRATION = 0;
 
 const LIKELIHOOD_BANDS = [
   { min: 0, max: 14, label: "remote chance" },
@@ -38,6 +39,8 @@ const LIKELIHOOD_BANDS = [
 const CONTEXT_STOP_WORDS = new Set([
   "the", "and", "for", "with", "within", "from", "that", "this", "scenario", "scenarios", "would", "could", "should", "about", "into", "over", "under", "through", "across", "after", "before", "during", "while", "very", "more", "less", "than", "minimal", "managed", "limited", "major", "minor", "likely", "unlikely", "possible", "current", "future", "cold", "hot", "containment", "collapse", "shock", "escalation"
 ]);
+
+const SIGNAL_QUERY_STOP_WORDS = new Set([...CONTEXT_STOP_WORDS, "attempt", "attempts", "repeated", "disrupted", "halted", "increase", "increases", "continue", "continues", "expand", "expands", "announced", "placed", "activated"]);
 
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
@@ -75,6 +78,10 @@ function tokenise(value) {
     .filter((word) => word.length > 2);
 }
 
+function unique(values) {
+  return Array.from(new Set(values.map((value) => cleanText(value, 180)).filter(Boolean)));
+}
+
 function clampPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -96,7 +103,6 @@ function parseWeightedSignal(value) {
 
   const raw = cleanText(value, 160);
   if (!raw) return null;
-
   const match = raw.match(/^(.*?)\s*\((3|6|9)\)\s*$/);
   const text = cleanText(match ? match[1] : raw, 140);
   const weight = match ? Number(match[2]) : DEFAULT_SIGNAL_WEIGHT;
@@ -138,9 +144,7 @@ function containsImplementationDetails(value) {
 function scrubImplementationDetails(value, fallback = "Not enough evidence found to support this scenario.") {
   const raw = cleanText(value, 1400);
   if (!raw) return fallback;
-
   if (containsImplementationDetails(raw)) return fallback;
-
   return raw
     .replace(/\bTavily\b/gi, "the selected sources")
     .replace(/\bOpenAI\b/gi, "the assessment")
@@ -165,9 +169,7 @@ function sanitiseScenario(input, index) {
     : typeof input?.signals === "string"
       ? input.signals.split(/[\n,;]+/)
       : [];
-
   const weightedSignals = rawSignals.map(parseWeightedSignal).filter(Boolean).slice(0, MAX_SIGNALS_PER_SCENARIO);
-
   return {
     name,
     description,
@@ -202,13 +204,11 @@ function sanitisePayload(body = {}) {
     .map(sanitiseScenario)
     .filter((scenario) => scenario.name && scenario.weighted_signals.length)
     .slice(0, MAX_SCENARIOS);
-
   const suppliedSources = Array.isArray(body.sources) ? body.sources : DEFAULT_SOURCES;
   const sources = suppliedSources
     .map(sanitiseSource)
     .filter((source) => source && source.enabled)
     .slice(0, MAX_SOURCES);
-
   return { scenarios, sources };
 }
 
@@ -220,7 +220,6 @@ function withTimeout(ms) {
 
 async function fetchFeed(source) {
   if (isTavilySource(source)) return [];
-
   const { signal, clear } = withTimeout(RSS_TIMEOUT_MS);
   try {
     const response = await fetch(source.url, {
@@ -250,12 +249,16 @@ async function fetchFeed(source) {
   }
 }
 
+function getScenarioTopicText(scenarios = []) {
+  return scenarios.flatMap((scenario) => [scenario.name, scenario.description]).map((value) => cleanText(value, 180)).filter(Boolean);
+}
+
+function getScenarioSignalText(scenarios = []) {
+  return scenarios.flatMap((scenario) => getWeightedSignals(scenario).map((signal) => signal.text)).map((value) => cleanText(value, 140)).filter(Boolean);
+}
+
 function getScenarioSearchText(scenarios = []) {
-  return scenarios.flatMap((scenario) => [
-    scenario.name,
-    scenario.description,
-    ...getWeightedSignals(scenario).map((signal) => signal.text)
-  ]).map((value) => cleanText(value, 140)).filter(Boolean);
+  return unique([...getScenarioTopicText(scenarios), ...getScenarioSignalText(scenarios)]);
 }
 
 function getScenarioContextTokens(scenario = {}) {
@@ -284,33 +287,43 @@ function articleMatchesSourceDomain(article, source) {
   return sameOrSubdomain(articleDomain, sourceDomain);
 }
 
-function buildFocusedTavilyQuery({ scenarios }) {
-  const terms = Array.from(new Set(getScenarioSearchText(scenarios)));
-  return terms.slice(0, 10).join(" OR ") || buildScenarioSearchQuery({ scenarios }) || "";
-}
-
-function buildCompactScenarioQuery({ scenarios }) {
-  const stopWords = new Set([...CONTEXT_STOP_WORDS, "attempt", "attempts", "repeated", "disrupted", "halted"]);
+function compactKeywordQuery(values, stopWords, limit = 10) {
   const counts = new Map();
-  getScenarioSearchText(scenarios).forEach((value) => {
+  values.forEach((value) => {
     tokenise(value)
       .filter((token) => token.length > 3 && !stopWords.has(token))
       .forEach((token) => counts.set(token, (counts.get(token) || 0) + 1));
   });
-
   return Array.from(counts.entries())
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([token]) => token)
-    .slice(0, 8)
+    .slice(0, limit)
     .join(" ");
 }
 
+function buildTopicContextQuery({ scenarios }) {
+  const topicTerms = unique(getScenarioTopicText(scenarios));
+  const compactTopic = compactKeywordQuery(topicTerms, CONTEXT_STOP_WORDS, 10);
+  return unique([topicTerms.slice(0, 6).join(" OR "), compactTopic]).filter(Boolean);
+}
+
+function buildSignalQuery({ scenarios }) {
+  const signalTerms = unique(getScenarioSignalText(scenarios));
+  const compactSignals = compactKeywordQuery(signalTerms, SIGNAL_QUERY_STOP_WORDS, 10);
+  return unique([signalTerms.slice(0, 8).join(" OR "), compactSignals]).filter(Boolean);
+}
+
 function buildTavilyQueryChain({ scenarios }) {
-  const focused = buildFocusedTavilyQuery({ scenarios });
-  const compact = buildCompactScenarioQuery({ scenarios });
-  const names = scenarios.map((scenario) => scenario.name).filter(Boolean).join(" OR ");
-  const descriptions = scenarios.map((scenario) => scenario.description).filter(Boolean).join(" OR ");
-  return Array.from(new Set([focused, compact, names, descriptions].map((query) => cleanText(query, 280)).filter(Boolean)));
+  const topicQueries = buildTopicContextQuery({ scenarios });
+  const signalQueries = buildSignalQuery({ scenarios });
+  const legacyQuery = buildScenarioSearchQuery({ scenarios });
+  return unique([
+    ...topicQueries,
+    ...signalQueries,
+    legacyQuery,
+    scenarios.map((scenario) => scenario.name).filter(Boolean).join(" OR "),
+    scenarios.map((scenario) => scenario.description).filter(Boolean).join(" OR ")
+  ]).map((query) => cleanText(query, 280)).filter(Boolean);
 }
 
 function hasScenarioTopicOverlap(article, scenarios) {
@@ -323,7 +336,6 @@ function hasScenarioTopicOverlap(article, scenarios) {
 async function fetchCustomTavilyArticles({ source, scenarios }) {
   const domain = source.domain || hostnameFromUrl(source.url || source.homepage);
   if (!domain) return [];
-
   const attempts = [];
   for (const query of buildTavilyQueryChain({ scenarios })) {
     const articles = await fetchTavilyArticles({
@@ -332,17 +344,10 @@ async function fetchCustomTavilyArticles({ source, scenarios }) {
       maxResults: MAX_ITEMS_PER_SOURCE,
       useDefaultDomains: false
     });
-
     const domainMatchedArticles = articles.filter((article) => articleMatchesSourceDomain(article, source));
     const relevantArticles = domainMatchedArticles.filter((article) => hasScenarioTopicOverlap(article, scenarios));
-    attempts.push({
-      query,
-      result_count: articles.length,
-      domain_matched_count: domainMatchedArticles.length,
-      relevant_count: relevantArticles.length
-    });
+    attempts.push({ query, result_count: articles.length, domain_matched_count: domainMatchedArticles.length, relevant_count: relevantArticles.length });
     if (!relevantArticles.length) continue;
-
     return relevantArticles.map((article) => ({
       ...article,
       source_id: source.id,
@@ -355,7 +360,6 @@ async function fetchCustomTavilyArticles({ source, scenarios }) {
       tavilyQueryAttempts: attempts
     }));
   }
-
   console.warn("No relevant web results for custom source", { source: source.name, domain, attempts });
   return [];
 }
@@ -364,7 +368,6 @@ function scoreItemAgainstSignals(item, scenario) {
   const haystack = `${item.title} ${item.snippet}`.toLowerCase();
   const matchedSignals = [];
   let weightedScore = 0;
-
   for (const signal of getWeightedSignals(scenario)) {
     const tokens = tokenise(signal.text);
     if (!tokens.length) continue;
@@ -374,7 +377,6 @@ function scoreItemAgainstSignals(item, scenario) {
       weightedScore += signal.weight;
     }
   }
-
   return { matchedSignals, score: weightedScore, weightedScore };
 }
 
@@ -384,12 +386,7 @@ function scoreArticles(articles, scenarios) {
       const match = scoreItemAgainstSignals(article, scenario);
       const contextMatched = hasScenarioContextOverlap(article, scenario);
       const evidenceGatePassed = match.score >= MIN_CONTEXTLESS_SIGNAL_WEIGHT || (match.score > 0 && contextMatched);
-      return {
-        scenario: scenario.name,
-        ...match,
-        contextMatched,
-        evidenceGatePassed
-      };
+      return { scenario: scenario.name, ...match, contextMatched, evidenceGatePassed };
     }).filter((match) => match.score > 0 && match.evidenceGatePassed);
     const totalScore = scenarioMatches.reduce((sum, match) => sum + match.score, 0);
     return { ...article, scenario_matches: scenarioMatches, total_signal_score: totalScore };
@@ -401,23 +398,18 @@ function selectArticlesForModel(articles, scenarios, tavilySources = []) {
   const matched = scored
     .filter((article) => article.total_signal_score > 0)
     .sort((a, b) => b.total_signal_score - a.total_signal_score || String(b.published_at || "").localeCompare(String(a.published_at || "")));
-
   const selectedByUrl = new Map(matched.slice(0, MAX_ITEMS_FOR_MODEL).map((article) => [article.url, article]));
-
   for (const source of tavilySources) {
     const alreadyHasSource = Array.from(selectedByUrl.values()).some((article) => article.source_id === source.id);
     if (alreadyHasSource) continue;
-
     const candidates = scored
       .filter((article) => article.source_id === source.id && article.searchProvider === "tavily")
       .filter((article) => article.total_signal_score > 0)
       .slice(0, MAX_TAVILY_FALLBACK_PER_SOURCE);
-
     for (const candidate of candidates) {
       if (!selectedByUrl.has(candidate.url)) selectedByUrl.set(candidate.url, candidate);
     }
   }
-
   return Array.from(selectedByUrl.values()).slice(0, MAX_ITEMS_FOR_MODEL);
 }
 
@@ -425,67 +417,68 @@ function computeSourceWeightsForScenario(articles, scenario, sources) {
   const maxWeight = totalSignalWeight(scenario);
   const sourceById = new Map(sources.map((source) => [source.id, source]));
   const bySource = new Map();
-
   for (const article of articles) {
-    const match = Array.isArray(article.scenario_matches)
-      ? article.scenario_matches.find((item) => item.scenario === scenario.name)
-      : null;
+    const match = Array.isArray(article.scenario_matches) ? article.scenario_matches.find((item) => item.scenario === scenario.name) : null;
     if (!match || !match.score) continue;
-
     const source = sourceById.get(article.source_id) || {};
     const name = article.source || source.name || "Unknown source";
     const reliability = Math.max(0, Math.min(100, Number(source.reliability ?? article.reliability ?? 70)));
     const relevance = Math.min(100, Math.round((Number(match.score) / maxWeight) * 100));
     const weighting = Math.round((relevance * reliability) / 100);
     const existing = bySource.get(article.source_id);
-
     if (!existing || weighting > existing.weighting_percent) {
-      bySource.set(article.source_id, {
-        name,
-        relevance_percent: relevance,
-        reliability_percent: reliability,
-        weighting_percent: weighting,
-        selected: true
-      });
+      bySource.set(article.source_id, { name, relevance_percent: relevance, reliability_percent: reliability, weighting_percent: weighting, selected: true });
     }
   }
-
-  return Array.from(bySource.values())
-    .sort((a, b) => b.weighting_percent - a.weighting_percent || b.relevance_percent - a.relevance_percent)
-    .slice(0, 8);
+  return Array.from(bySource.values()).sort((a, b) => b.weighting_percent - a.weighting_percent || b.relevance_percent - a.relevance_percent).slice(0, 8);
 }
 
 function getMatchedSignalsFromArticles(articles, scenario) {
   const matched = new Set();
   for (const article of articles) {
-    const match = Array.isArray(article.scenario_matches)
-      ? article.scenario_matches.find((item) => item.scenario === scenario.name)
-      : null;
+    const match = Array.isArray(article.scenario_matches) ? article.scenario_matches.find((item) => item.scenario === scenario.name) : null;
     if (!match) continue;
     (match.matchedSignals || []).forEach((signal) => matched.add(signal));
   }
   return Array.from(matched);
 }
 
+function computeScoreCalibrationForScenario(articles, scenario, sources) {
+  const sourceWeights = computeSourceWeightsForScenario(articles, scenario, sources);
+  const matchedSignals = getMatchedSignalsFromArticles(articles, scenario);
+  const maxWeight = totalSignalWeight(scenario);
+  const matchedWeight = getWeightedSignals(scenario).filter((signal) => matchedSignals.includes(signal.text)).reduce((sum, signal) => sum + signal.weight, 0);
+  const weightedSignalCoverage = Math.round((matchedWeight / maxWeight) * 100);
+  const sourceSupport = Math.min(100, sourceWeights.reduce((sum, source) => sum + source.weighting_percent, 0));
+  const sourceDiversity = Math.min(100, sourceWeights.length * 20);
+  const calibratedLikelihood = matchedSignals.length
+    ? clampPercent((weightedSignalCoverage * 0.88) + (sourceSupport * 0.07) + (sourceDiversity * 0.05))
+    : 0;
+  return {
+    calibratedLikelihood,
+    likelihoodBand: likelihoodBand(calibratedLikelihood),
+    matchedSignals,
+    matchedWeight,
+    maxWeight,
+    weightedSignalCoverage,
+    sourceSupport,
+    sourceDiversity,
+    sourceWeights
+  };
+}
+
 function heuristicAssessment(scenarios, articles, sources) {
   return scenarios.map((scenario) => {
-    const matched = new Set(getMatchedSignalsFromArticles(articles, scenario));
-    const sourceWeights = computeSourceWeightsForScenario(articles, scenario, sources);
-    const maxWeight = totalSignalWeight(scenario);
-    const matchedWeight = getWeightedSignals(scenario).filter((signal) => matched.has(signal.text)).reduce((sum, signal) => sum + signal.weight, 0);
-    const signalCoverage = Math.round((matchedWeight / maxWeight) * 100);
-    const sourceSupport = sourceWeights.reduce((sum, value) => sum + value.weighting_percent, 0);
-    const likelihood = matched.size ? Math.min(100, Math.round((signalCoverage * 0.7) + (Math.min(100, sourceSupport) * 0.3))) : 0;
-
+    const calibration = computeScoreCalibrationForScenario(articles, scenario, sources);
     return {
       scenario: scenario.name,
-      likelihood_percent: likelihood,
-      likelihood_band: likelihoodBand(likelihood),
-      rationale: matched.size
-        ? `Matched weighted signals worth ${matchedWeight} of ${maxWeight} available impact points in selected sources. This is a ${likelihoodBand(likelihood)} based on the supplied evidence.`
+      likelihood_percent: calibration.calibratedLikelihood,
+      likelihood_band: calibration.likelihoodBand,
+      rationale: calibration.matchedSignals.length
+        ? `Matched weighted signals worth ${calibration.matchedWeight} of ${calibration.maxWeight} available impact points in selected sources. This is a ${calibration.likelihoodBand} based on the supplied evidence.`
         : "Not enough evidence found to support this scenario.",
-      matched_signals: Array.from(matched),
-      source_weights: sourceWeights
+      matched_signals: calibration.matchedSignals,
+      source_weights: calibration.sourceWeights
     };
   });
 }
@@ -497,25 +490,27 @@ function applyComputedWeights(assessment = {}, scenarios = [], articles = [], so
     scenario_scores: Array.isArray(assessment.scenario_scores)
       ? assessment.scenario_scores.map((score) => {
           const scenario = scenarioByName.get(score.scenario);
-          const likelihood = clampPercent(score.likelihood_percent);
-          if (!scenario) {
-            return {
-              ...score,
-              likelihood_percent: likelihood,
-              likelihood_band: likelihoodBand(likelihood),
-              rationale: scrubImplementationDetails(score.rationale)
-            };
-          }
-
-          const sourceWeights = computeSourceWeightsForScenario(articles, scenario, sources);
-          const matchedSignals = getMatchedSignalsFromArticles(articles, scenario);
+          if (!scenario) return { ...score, likelihood_percent: clampPercent(score.likelihood_percent), likelihood_band: likelihoodBand(score.likelihood_percent), rationale: scrubImplementationDetails(score.rationale) };
+          const calibration = computeScoreCalibrationForScenario(articles, scenario, sources);
+          const modelLikelihood = clampPercent(score.likelihood_percent);
+          const cappedLikelihood = Math.min(modelLikelihood, calibration.calibratedLikelihood + MAX_MODEL_SCORE_ABOVE_CALIBRATION);
+          const finalLikelihood = calibration.matchedSignals.length ? cappedLikelihood : 0;
           return {
             ...score,
-            likelihood_percent: likelihood,
-            likelihood_band: likelihoodBand(likelihood),
+            model_likelihood_percent: modelLikelihood,
+            likelihood_percent: finalLikelihood,
+            likelihood_band: likelihoodBand(finalLikelihood),
             rationale: scrubImplementationDetails(score.rationale),
-            matched_signals: matchedSignals.length ? matchedSignals : score.matched_signals || [],
-            source_weights: sourceWeights
+            matched_signals: calibration.matchedSignals.length ? calibration.matchedSignals : score.matched_signals || [],
+            source_weights: calibration.sourceWeights,
+            score_calibration: {
+              weighted_signal_coverage_percent: calibration.weightedSignalCoverage,
+              matched_signal_weight: calibration.matchedWeight,
+              total_signal_weight: calibration.maxWeight,
+              source_support_percent: calibration.sourceSupport,
+              source_diversity_percent: calibration.sourceDiversity,
+              calibrated_likelihood_percent: calibration.calibratedLikelihood
+            }
           };
         })
       : []
@@ -526,20 +521,18 @@ async function callModel({ scenarios, articles, sources }) {
   if (!openai || articles.length === 0) {
     return applyComputedWeights({ scenario_scores: heuristicAssessment(scenarios, articles, sources), confidence: articles.length ? "medium" : "low" }, scenarios, articles, sources);
   }
-
-  const precomputedSourceWeights = Object.fromEntries(
-    scenarios.map((scenario) => [scenario.name, computeSourceWeightsForScenario(articles, scenario, sources)])
-  );
-
+  const precomputedSourceWeights = Object.fromEntries(scenarios.map((scenario) => [scenario.name, computeSourceWeightsForScenario(articles, scenario, sources)]));
+  const precomputedScoreCalibrations = Object.fromEntries(scenarios.map((scenario) => [scenario.name, computeScoreCalibrationForScenario(articles, scenario, sources)]));
   const prompt = JSON.stringify({
-    instruction: "Estimate each user-defined scenario independently from 0-100 using only the selected source articles. Do not normalize the scores and do not make them sum to 100. Signals have impact weights of 3, 6, or 9. Apply signal weights before source reliability: matching a weight-9 signal is three times as important as matching a weight-3 signal. Use the supplied precomputed source weights as fixed source weighting values; do not invent or recalculate them. Generic signal matches only count when the article also matches the scenario context, unless the matched signal is high impact. Use these percentage boundaries exactly: 0-14 remote chance, 15-24 highly unlikely, 25-34 unlikely, 35-54 realistic possibility, 55-74 likely/probably, 75-89 highly likely, 90-100 almost certain. Score each scenario by weighted evidence strength: 0 means no meaningful evidence in the selected sources, 50 means moderate weighted evidence, and 100 means very strong/current weighted evidence across multiple reliable sources. Ignore irrelevant articles that do not directly support the scenario signals and context. Never mention implementation details, search tools, providers, fallback behavior, prompts, APIs, models, or internal processing. If evidence is weak or absent, say 'Not enough evidence found to support this scenario.' Do not invent evidence.",
+    instruction: "Estimate each user-defined scenario independently from 0-100 using only the selected source articles. Do not normalize the scores and do not make them sum to 100. Signals have impact weights of 3, 6, or 9. Apply signal weights before source reliability. Use the supplied precomputed source weights and score calibration as fixed constraints; do not invent or recalculate them. Your likelihood must not exceed the calibrated likelihood unless the supplied articles clearly justify stronger evidence. Generic signal matches only count when the article also matches the scenario context, unless the matched signal is high impact. Use these percentage boundaries exactly: 0-14 remote chance, 15-24 highly unlikely, 25-34 unlikely, 35-54 realistic possibility, 55-74 likely/probably, 75-89 highly likely, 90-100 almost certain. Ignore irrelevant articles that do not directly support the scenario signals and context. Never mention implementation details, search tools, providers, fallback behavior, prompts, APIs, models, or internal processing. If evidence is weak or absent, say 'Not enough evidence found to support this scenario.' Do not invent evidence.",
     likelihood_boundaries: LIKELIHOOD_BANDS,
     scenarios: scenarios.map((scenario) => ({
       name: scenario.name,
       description: scenario.description,
       signals: getWeightedSignals(scenario).map((signal) => ({ text: signal.text, weight: signal.weight })),
       total_signal_weight: totalSignalWeight(scenario),
-      precomputed_source_weights: precomputedSourceWeights[scenario.name] || []
+      precomputed_source_weights: precomputedSourceWeights[scenario.name] || [],
+      precomputed_score_calibration: precomputedScoreCalibrations[scenario.name] || null
     })),
     selected_sources: sources.map(({ id, name, url, reliability, type, domain }) => ({ id, name, url, type, domain, reliability_percent: reliability })),
     articles: articles.map((article) => ({
@@ -553,7 +546,6 @@ async function callModel({ scenarios, articles, sources }) {
       matched_before_model: article.scenario_matches
     }))
   }, null, 2);
-
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -592,12 +584,11 @@ async function callModel({ scenarios, articles, sources }) {
     },
     required: ["confidence", "scenario_scores"]
   };
-
   const response = await Promise.race([
     openai.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
       input: [
-        { role: "developer", content: [{ type: "input_text", text: "Return compact JSON only. Ground every independent likelihood in the supplied article snippets and weighted user-defined signals. Use the supplied precomputed source weights as fixed values. Never normalize scenario scores against each other. Never mention implementation details such as AI, models, prompts, APIs, or source-search technology in user-facing text." }] },
+        { role: "developer", content: [{ type: "input_text", text: "Return compact JSON only. Ground every independent likelihood in the supplied article snippets and weighted user-defined signals. Use precomputed source weights and score calibration as fixed constraints. Never normalize scenario scores against each other. Never mention implementation details such as AI, models, prompts, APIs, or source-search technology in user-facing text." }] },
         { role: "user", content: [{ type: "input_text", text: prompt }] }
       ],
       temperature: 0.2,
@@ -606,43 +597,35 @@ async function callModel({ scenarios, articles, sources }) {
     }),
     new Promise((_, reject) => setTimeout(() => reject(new Error("OpenAI request timed out")), OPENAI_TIMEOUT_MS))
   ]);
-
   const output = response.output_text || response.output?.[0]?.content?.[0]?.text || "{}";
   return applyComputedWeights(JSON.parse(output), scenarios, articles, sources);
 }
 
 export default async function handler(req, res) {
   setCors(res);
-
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return sendJson(res, 405, { error: "Use POST with scenarios and sources." });
-
   try {
     const { scenarios, sources } = sanitisePayload(req.body || {});
     if (!scenarios.length) return sendJson(res, 400, { error: "Enter at least one scenario with at least one signal." });
     if (!sources.length) return sendJson(res, 400, { error: "Select at least one source." });
-
     const failed_sources = [];
     const articles = [];
     const rssSources = sources.filter((source) => !isTavilySource(source));
     const tavilySources = sources.filter(isTavilySource);
-
     const feedResults = await Promise.allSettled(rssSources.map(fetchFeed));
     feedResults.forEach((result, index) => {
       if (result.status === "fulfilled") articles.push(...result.value);
       else failed_sources.push({ name: rssSources[index].name, url: rssSources[index].url, error: result.reason?.message || "Fetch failed" });
     });
-
     const tavilyResults = await Promise.allSettled(tavilySources.map((source) => fetchCustomTavilyArticles({ source, scenarios })));
     tavilyResults.forEach((result, index) => {
       if (result.status === "fulfilled") articles.push(...result.value);
       else failed_sources.push({ name: tavilySources[index].name, url: tavilySources[index].url, error: result.reason?.message || "Source search failed" });
     });
-
     const modelArticles = selectArticlesForModel(articles, scenarios, tavilySources);
     const tavilyArticles = articles.filter((article) => article.searchProvider === "tavily");
     const assessment = await callModel({ scenarios, articles: modelArticles, sources });
-
     return sendJson(res, 200, {
       assessed_at: new Date().toISOString(),
       scenario_scores: assessment.scenario_scores || [],
@@ -652,10 +635,13 @@ export default async function handler(req, res) {
       failed_sources,
       evidence_articles: modelArticles.map(({ source, title, url, published_at, scenario_matches, searchProvider, tavilyQuery }) => ({ source, title, url, published_at, scenario_matches, searchProvider, tavilyQuery })),
       source_diagnostics: {
+        topic_first_query_enabled: true,
+        score_calibration_enabled: true,
         signal_weights_enabled: true,
         context_relevance_gate_enabled: true,
         source_domain_gate_enabled: true,
         code_computed_source_weights_enabled: true,
+        max_model_score_above_calibration: MAX_MODEL_SCORE_ABOVE_CALIBRATION,
         min_contextless_signal_weight: MIN_CONTEXTLESS_SIGNAL_WEIGHT,
         rss_source_count: rssSources.length,
         tavily_source_count: tavilySources.length,
