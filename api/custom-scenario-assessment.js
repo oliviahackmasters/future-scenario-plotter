@@ -22,6 +22,7 @@ const MAX_SIGNALS_PER_SCENARIO = 12;
 const MAX_SOURCES = 20;
 const MAX_ITEMS_PER_SOURCE = 8;
 const MAX_ITEMS_FOR_MODEL = 24;
+const MAX_TAVILY_FALLBACK_PER_SOURCE = 2;
 const RSS_TIMEOUT_MS = 5000;
 const OPENAI_TIMEOUT_MS = 24000;
 
@@ -151,11 +152,27 @@ async function fetchFeed(source) {
   }
 }
 
+function buildFocusedTavilyQuery({ source, scenarios }) {
+  const terms = Array.from(new Set([
+    ...scenarios.map((scenario) => scenario.name),
+    ...scenarios.map((scenario) => scenario.description),
+    ...scenarios.flatMap((scenario) => scenario.signals),
+    "Iran",
+    "Strait of Hormuz",
+    "Gulf shipping",
+    "oil prices",
+    "US Iran talks"
+  ].map((value) => cleanText(value, 80)).filter(Boolean)));
+
+  // Avoid adding the source name/domain to the query because Tavily's include_domains already handles scoping.
+  return terms.slice(0, 10).join(" OR ") || buildScenarioSearchQuery({ scenarios }) || source.name;
+}
+
 async function fetchCustomTavilyArticles({ source, scenarios }) {
   const domain = source.domain || hostnameFromUrl(source.url || source.homepage);
   if (!domain) return [];
 
-  const query = buildScenarioSearchQuery({ scenarios, extraTerms: [source.name, domain] }) || scenarios.map((scenario) => scenario.name).join(" OR ");
+  const query = buildFocusedTavilyQuery({ source, scenarios });
   const articles = await fetchTavilyArticles({
     query,
     domains: [domain],
@@ -185,19 +202,40 @@ function scoreItemAgainstSignals(item, scenario) {
   return { matchedSignals, score: matchedSignals.length };
 }
 
-function prefilterArticles(articles, scenarios) {
-  return articles
-    .map((article) => {
-      const scenarioMatches = scenarios.map((scenario) => ({
-        scenario: scenario.name,
-        ...scoreItemAgainstSignals(article, scenario)
-      })).filter((match) => match.score > 0);
-      const totalScore = scenarioMatches.reduce((sum, match) => sum + match.score, 0);
-      return { ...article, scenario_matches: scenarioMatches, total_signal_score: totalScore };
-    })
+function scoreArticles(articles, scenarios) {
+  return articles.map((article) => {
+    const scenarioMatches = scenarios.map((scenario) => ({
+      scenario: scenario.name,
+      ...scoreItemAgainstSignals(article, scenario)
+    })).filter((match) => match.score > 0);
+    const totalScore = scenarioMatches.reduce((sum, match) => sum + match.score, 0);
+    return { ...article, scenario_matches: scenarioMatches, total_signal_score: totalScore };
+  });
+}
+
+function selectArticlesForModel(articles, scenarios, tavilySources = []) {
+  const scored = scoreArticles(articles, scenarios);
+  const matched = scored
     .filter((article) => article.total_signal_score > 0)
-    .sort((a, b) => b.total_signal_score - a.total_signal_score || String(b.published_at || "").localeCompare(String(a.published_at || "")))
-    .slice(0, MAX_ITEMS_FOR_MODEL);
+    .sort((a, b) => b.total_signal_score - a.total_signal_score || String(b.published_at || "").localeCompare(String(a.published_at || "")));
+
+  const selectedByUrl = new Map(matched.slice(0, MAX_ITEMS_FOR_MODEL).map((article) => [article.url, article]));
+
+  // Preserve a small sample from each Tavily source, even when keyword prefiltering fails, so the model can judge relevance.
+  for (const source of tavilySources) {
+    const alreadyHasSource = Array.from(selectedByUrl.values()).some((article) => article.source_id === source.id);
+    if (alreadyHasSource) continue;
+
+    const candidates = scored
+      .filter((article) => article.source_id === source.id && article.searchProvider === "tavily")
+      .slice(0, MAX_TAVILY_FALLBACK_PER_SOURCE);
+
+    for (const candidate of candidates) {
+      if (!selectedByUrl.has(candidate.url)) selectedByUrl.set(candidate.url, candidate);
+    }
+  }
+
+  return Array.from(selectedByUrl.values()).slice(0, MAX_ITEMS_FOR_MODEL);
 }
 
 function heuristicAssessment(scenarios, articles, sources) {
@@ -247,7 +285,7 @@ async function callModel({ scenarios, articles, sources }) {
   }
 
   const prompt = JSON.stringify({
-    instruction: "Estimate each user-defined scenario independently from 0-100 using only the selected source articles. Do not normalize the scores and do not make them sum to 100. A single scenario should not automatically be 100%; two scenarios should not automatically be 50/50. Score each scenario by evidence strength: 0 means no meaningful evidence in the selected sources, 50 means moderate evidence, and 100 means very strong/current evidence across multiple reliable sources. Report source relevance, source reliability, and weighting for each useful source. Do not invent evidence.",
+    instruction: "Estimate each user-defined scenario independently from 0-100 using only the selected source articles. Do not normalize the scores and do not make them sum to 100. A single scenario should not automatically be 100%; two scenarios should not automatically be 50/50. Score each scenario by evidence strength: 0 means no meaningful evidence in the selected sources, 50 means moderate evidence, and 100 means very strong/current evidence across multiple reliable sources. Report source relevance, source reliability, and weighting for each useful source. Ignore irrelevant articles, including Tavily fallback articles that do not directly support the scenario signals. Do not invent evidence.",
     scenarios,
     selected_sources: sources.map(({ id, name, url, reliability, type, domain }) => ({ id, name, url, type, domain, reliability_percent: reliability })),
     articles: articles.map((article) => ({
@@ -351,8 +389,8 @@ export default async function handler(req, res) {
       else failed_sources.push({ name: tavilySources[index].name, url: tavilySources[index].url, error: result.reason?.message || "Tavily search failed" });
     });
 
-    const filteredArticles = prefilterArticles(articles, scenarios);
-    const assessment = await callModel({ scenarios, articles: filteredArticles, sources });
+    const modelArticles = selectArticlesForModel(articles, scenarios, tavilySources);
+    const assessment = await callModel({ scenarios, articles: modelArticles, sources });
 
     return sendJson(res, 200, {
       assessed_at: new Date().toISOString(),
@@ -360,14 +398,15 @@ export default async function handler(req, res) {
       confidence: assessment.confidence || "low",
       sources_used: sources.map(({ id, name, url, reliability, type, domain }) => ({ id, name, url, type, domain, reliability_percent: reliability, selected: true })),
       failed_sources,
-      evidence_articles: filteredArticles.map(({ source, title, url, published_at, scenario_matches, searchProvider }) => ({ source, title, url, published_at, scenario_matches, searchProvider })),
+      evidence_articles: modelArticles.map(({ source, title, url, published_at, scenario_matches, searchProvider }) => ({ source, title, url, published_at, scenario_matches, searchProvider })),
       source_diagnostics: {
         rss_source_count: rssSources.length,
         tavily_source_count: tavilySources.length,
         total_articles_collected: articles.length,
-        evidence_articles_after_filter: filteredArticles.length,
+        evidence_articles_after_filter: modelArticles.length,
         tavily_articles_collected: articles.filter((article) => article.searchProvider === "tavily").length,
-        tavily_evidence_after_filter: filteredArticles.filter((article) => article.searchProvider === "tavily").length
+        tavily_evidence_after_filter: modelArticles.filter((article) => article.searchProvider === "tavily").length,
+        tavily_fallback_per_source: MAX_TAVILY_FALLBACK_PER_SOURCE
       }
     });
   } catch (error) {
