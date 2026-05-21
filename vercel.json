@@ -1,5 +1,8 @@
 {
   "functions": {
+    "api/sources.js": {
+      "maxDuration": 30
+    },
     "api/scenario-assessment.js": {
       "maxDuration": 60
     },

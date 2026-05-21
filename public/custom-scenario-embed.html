@@ -87,7 +87,7 @@
 
   <script>
     (function(){
-      const API_BASE=new URLSearchParams(location.search).get('api')||location.origin;
+      const API_BASE=new URLSearchParams(location.search).get('api')||'https://future-scenario-predictor.vercel.app';
       const API_ROOT=API_BASE.replace(/\/$/,'');
       const API_URL=API_ROOT+'/api/custom-scenario-assessment';
       const SOURCES_TOPIC=new URLSearchParams(location.search).get('sourcesTopic')||'custom';
@@ -363,6 +363,7 @@
 </html>
 
 <script>
+  window.HM_SCENARIO_API_BASE = "https://future-scenario-predictor.vercel.app";
   window.HM_PROJECT_MEMORY_API_BASE = "https://project-memory-api.olivia-9ef.workers.dev/";
 </script>
 <script src="https://project-memory-api.olivia-9ef.workers.dev/project-memory-client.js"></script>
