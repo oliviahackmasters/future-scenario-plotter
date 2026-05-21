@@ -314,9 +314,10 @@
         (data.scenario_scores||[]).forEach(score=>byName.set(score.scenario,score));
         for(let i=0;i<4;i+=1){
           const card=document.getElementById(`result-${i}`);const scenario=scenarios[i];
-          if(!scenario){card.innerHTML=`<span><strong>Scenario ${i+1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;continue}
+          if(!scenario){card.innerHTML=`<span><strong>Scenario not entered</strong><br><br><span class="small">Add a scenario name, description, and signals to compare likelihood.</span></span>`;continue}
           const score=byName.get(scenario.name)||data.scenario_scores?.[i];
-          card.innerHTML=`<span><strong>${escapeHtml(scenario.name)}</strong><br>${Math.round(score?.likelihood_percent||0)}%<br><span class="small">${escapeHtml(score?.rationale||'')}</span></span>`;
+          const likelihoodHtml=score?.likelihood_percent===null?`<strong style="color:var(--hm-copper)">INSUFFICIENT EVIDENCE</strong><br><span class="small">Not enough relevant evidence found to assess this scenario.</span>`:`${Math.round(score?.likelihood_percent||0)}%`;
+          card.innerHTML=`<span><strong>${escapeHtml(scenario.name)}</strong><br>${likelihoodHtml}<br><span class="small">${escapeHtml(score?.rationale||'')}</span></span>`;
         }
         renderAvailableSources();
         renderEvidenceUsed(data);
