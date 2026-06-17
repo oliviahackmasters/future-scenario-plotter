@@ -1,0 +1,614 @@
+--- repo/future-scenario-plotter-main/lib/custom-scenario-assessment-handler.js	2026-06-09 19:04:39.000000000 +0000
++++ patch/lib/custom-scenario-assessment-handler.js	2026-06-17 10:23:54.680591645 +0000
+@@ -37,6 +37,13 @@
+ const FRESH_NEWS_DAYS = 30;
+ const RECENT_NEWS_DAYS = 60;
+ 
++// Budget controls for the second-chance LLM entity-overlap check. Kept
++// small and capped so a single assessment request never balloons into
++// dozens of extra model calls -- this is one batched call per scenario,
++// covering at most this many near-miss articles.
++const SECOND_CHANCE_MAX_ARTICLES = 20;
++const SECOND_CHANCE_TIMEOUT_MS = 10000;
++
+ const LIKELIHOOD_BANDS = [
+   { min: 0, max: 14, label: "remote chance" },
+   { min: 15, max: 24, label: "highly unlikely" },
+@@ -501,7 +508,94 @@
+   return unique(queries);
+ }
+ 
++/**
++ * Heuristic entity/keyword extraction used when BOTH planner model attempts
++ * fail. This is intentionally simple (no LLM call) so it can never throw and
++ * never times out — it exists purely so entities/signals_to_track are never
++ * a hard empty array, since several downstream gates (hasScenarioEntityOverlap,
++ * hasStrongRssTopicMatch) treat an empty searchPlan as "reject almost everything"
++ * rather than "fall back to scenario-only heuristics" for any scenario whose
++ * name isn't one of the small set of hardcoded topics.
++ */
++function heuristicEntitiesAndSignals(scenarios = []) {
++  const signalTexts = unique(scenarioSignalText(scenarios));
++  const topicTexts = unique(scenarioTopicText(scenarios));
++
++  // Capitalised multi-word or proper-noun-ish tokens from name/description
++  // are a reasonable cheap proxy for "entities" when no model is available.
++  const properNounPattern = /\b([A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){0,3})\b/g;
++  const entities = unique(
++    topicTexts.flatMap((text) => {
++      const matches = String(text).match(properNounPattern) || [];
++      return matches.map((m) => m.trim()).filter((m) => m.length >= 4);
++    })
++  ).slice(0, 20);
++
++  return {
++    entities,
++    industries: [],
++    geographies: [],
++    signals_to_track: signalTexts.slice(0, 16)
++  };
++}
++
++async function requestSearchPlanFromModel(model, scenarioPayload, schema, timeoutMs = SEARCH_PLANNER_TIMEOUT_MS) {
++  const response = await Promise.race([
++    openai.responses.create({
++      model,
++      input: [
++        {
++          role: "developer",
++          content: [
++            {
++              type: "input_text",
++              text: `You are a scenario research strategist.
++
++Convert future scenario inputs into concrete article-search intelligence.
++
++Return search queries that look like real news/search queries, not strategy workshop language.
++
++Rules:
++- Focus on concrete actors, policies, companies, technologies, markets, geographies, events and weak signals.
++- Include 8-14 search_queries.
++- Include 8-14 signals_to_track.
++- Include named entities where useful.
++- Do not invent fake citations or sources.
++- Avoid generic words such as future, scenario, disruption, risk, change, uncertainty unless paired with concrete terms.
++- Queries should be short and searchable, usually 4-9 words.`
++            }
++          ]
++        },
++        {
++          role: "user",
++          content: [
++            {
++              type: "input_text",
++              text: JSON.stringify({ scenarios: scenarioPayload }, null, 2)
++            }
++          ]
++        }
++      ],
++      temperature: 0.2,
++      max_output_tokens: 1600,
++      text: {
++        format: {
++          type: "json_schema",
++          name: "scenario_search_plan",
++          schema,
++          strict: true
++        }
++      }
++    }),
++    new Promise((_, reject) => setTimeout(() => reject(new Error(`OpenAI search planner timed out (${model})`)), timeoutMs))
++  ]);
++
++  return JSON.parse(response.output_text || response.output?.[0]?.content?.[0]?.text || "{}");
++}
++
+ async function buildScenarioSearchPlan({ scenarios }) {
++  const heuristics = heuristicEntitiesAndSignals(scenarios);
++
+   const fallback = {
+     planner_status: openai ? "fallback" : "no_openai_client",
+     planner_error: openai ? null : "OPENAI_API_KEY is missing or OpenAI client was not initialised.",
+@@ -511,10 +605,16 @@
+       ...fallbackStrategicQueries(scenarios),
+       ...buildTavilyQueryChain({ scenarios })
+     ]),
+-    signals_to_track: unique(scenarioSignalText(scenarios)),
+-    entities: [],
+-    industries: [],
+-    geographies: [],
++    // Previously these three were hard-empty arrays whenever the planner
++    // failed. That silently starved hasScenarioEntityOverlap and
++    // hasStrongRssTopicMatch downstream, since both treat an empty
++    // entities/signals_to_track list as near-impossible to satisfy for any
++    // scenario whose name isn't hardcoded (gulf/executive/creative/skincare).
++    // Heuristic extraction is a much better floor than nothing.
++    signals_to_track: heuristics.signals_to_track,
++    entities: heuristics.entities,
++    industries: heuristics.industries,
++    geographies: heuristics.geographies,
+     exclude_terms: []
+   };
+ 
+@@ -551,90 +651,65 @@
+     ]
+   };
+ 
+-  try {
+-    const response = await Promise.race([
+-      openai.responses.create({
+-        model: process.env.OPENAI_SEARCH_PLANNER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini",
+-        input: [
+-          {
+-            role: "developer",
+-            content: [
+-              {
+-                type: "input_text",
+-                text: `You are a scenario research strategist.
++  // Try the primary planner model, then ONE fallback model, before giving up.
++  // A single transient timeout/error on one model should not zero out the
++  // entity/signal vocabulary for the whole assessment.
++  const primaryModel = process.env.OPENAI_SEARCH_PLANNER_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini";
++  const secondaryModel = process.env.OPENAI_SEARCH_PLANNER_FALLBACK_MODEL || "gpt-4o-mini";
++  const attemptedModels = primaryModel === secondaryModel ? [primaryModel] : [primaryModel, secondaryModel];
++
++  const errors = [];
++
++  for (const [index, model] of attemptedModels.entries()) {
++    // Give the retry attempt a shorter budget than the first -- two full
++    // SEARCH_PLANNER_TIMEOUT_MS (12s) attempts back-to-back, plus feed
++    // fetching and the second-chance classification pass later in the
++    // pipeline, risks approaching this endpoint's 60s Vercel function
++    // timeout (see vercel.json). 12s + 6s keeps the planner stage's worst
++    // case bounded at 18s.
++    const timeoutMs = index === 0 ? SEARCH_PLANNER_TIMEOUT_MS : Math.round(SEARCH_PLANNER_TIMEOUT_MS / 2);
+ 
+-Convert future scenario inputs into concrete article-search intelligence.
+-
+-Return search queries that look like real news/search queries, not strategy workshop language.
+-
+-Rules:
+-- Focus on concrete actors, policies, companies, technologies, markets, geographies, events and weak signals.
+-- Include 8-14 search_queries.
+-- Include 8-14 signals_to_track.
+-- Include named entities where useful.
+-- Do not invent fake citations or sources.
+-- Avoid generic words such as future, scenario, disruption, risk, change, uncertainty unless paired with concrete terms.
+-- Queries should be short and searchable, usually 4-9 words.`
+-              }
+-            ]
+-          },
+-          {
+-            role: "user",
+-            content: [
+-              {
+-                type: "input_text",
+-                text: JSON.stringify({ scenarios: scenarioPayload }, null, 2)
+-              }
+-            ]
+-          }
+-        ],
+-        temperature: 0.2,
+-        max_output_tokens: 1600,
+-        text: {
+-          format: {
+-            type: "json_schema",
+-            name: "scenario_search_plan",
+-            schema,
+-            strict: true
+-          }
+-        }
+-      }),
+-      new Promise((_, reject) => setTimeout(() => reject(new Error("OpenAI search planner timed out")), SEARCH_PLANNER_TIMEOUT_MS))
+-    ]);
+-
+-
+-    const parsed = JSON.parse(response.output_text || response.output?.[0]?.content?.[0]?.text || "{}");
++    try {
++      const parsed = await requestSearchPlanFromModel(model, scenarioPayload, schema, timeoutMs);
+ 
+-    return {
+-      planner_status: "ok",
+-      planner_error: null,
+-      scenario_summary: cleanText(parsed.scenario_summary, 500),
+-      core_topic: cleanText(parsed.core_topic, 180),
+-      industries: unique(parsed.industries || []).slice(0, 12),
+-      geographies: unique(parsed.geographies || []).slice(0, 12),
+-      entities: unique(parsed.entities || []).slice(0, 20),
+-      signals_to_track: unique(parsed.signals_to_track || []).slice(0, 16),
+-      search_queries: unique([
+-  ...fallbackStrategicQueries(scenarios),
+-  ...(parsed.search_queries || []),
+-  ...fallback.search_queries
+-])
+-  .map((query) => cleanText(query, 280))
+-  .filter(Boolean)
+-  .slice(0, 28),
+-      exclude_terms: unique(parsed.exclude_terms || []).slice(0, 16)
+-    };
+-  } catch (error) {
+-    return {
+-      ...fallback,
+-      planner_status: "failed",
+-      planner_error: cleanText(error?.message || String(error), 500),
+-      search_queries: unique([
+-  ...fallbackStrategicQueries(scenarios),
+-  ...fallback.search_queries
+-])
+-    };
++      return {
++        planner_status: "ok",
++        planner_error: null,
++        planner_model_used: model,
++        scenario_summary: cleanText(parsed.scenario_summary, 500),
++        core_topic: cleanText(parsed.core_topic, 180),
++        industries: unique(parsed.industries || []).slice(0, 12),
++        geographies: unique(parsed.geographies || []).slice(0, 12),
++        entities: unique(parsed.entities || []).slice(0, 20),
++        signals_to_track: unique(parsed.signals_to_track || []).slice(0, 16),
++        search_queries: unique([
++          ...fallbackStrategicQueries(scenarios),
++          ...(parsed.search_queries || []),
++          ...fallback.search_queries
++        ])
++          .map((query) => cleanText(query, 280))
++          .filter(Boolean)
++          .slice(0, 28),
++        exclude_terms: unique(parsed.exclude_terms || []).slice(0, 16)
++      };
++    } catch (error) {
++      errors.push(`${model}: ${cleanText(error?.message || String(error), 200)}`);
++    }
+   }
++
++  // Both attempts failed. Fall back to heuristics rather than empty arrays,
++  // and surface the failure clearly so it shows up in the debug payload
++  // returned to the frontend instead of being silently invisible to users.
++  return {
++    ...fallback,
++    planner_status: "failed",
++    planner_error: errors.join(" | "),
++    planner_model_used: null,
++    search_queries: unique([
++      ...fallbackStrategicQueries(scenarios),
++      ...fallback.search_queries
++    ])
++  };
+ }
+ 
+ function sameOrSubdomain(child, parent) {
+@@ -725,8 +800,16 @@
+ 
+   const hits = combinedAnchors.filter((anchor) => haystack.includes(anchor));
+ 
++  // Previously RSS required a flat >=2 hits while every other provider
++  // (Tavily) only required >=1. That made sense when combinedAnchors was
++  // large (rich gulf/Iran-style anchor lists), but becomes an unreachable
++  // bar for thinly-worded custom scenarios with a small anchor vocabulary
++  // (e.g. searchPlan.entities/geographies/industries empty because the
++  // planner failed). Scale the RSS requirement to the vocabulary size
++  // instead of a flat constant, and never require more than 2.
+   if (provider === "rss") {
+-    return hits.length >= 2;
++    const requiredHits = combinedAnchors.length <= 4 ? 1 : 2;
++    return hits.length >= requiredHits;
+   }
+ 
+   return hits.length >= 1;
+@@ -1029,14 +1112,25 @@
+ }
+ 
+ function scoreItemAgainstSignals(item, scenario, searchPlan = null) {
++  if (!hasScenarioEntityOverlap(item, scenario, searchPlan)) {
++    return { matchedSignals: [], score: 0, weightedScore: 0 };
++  }
++  return scoreItemAgainstSignalsAssumingOverlap(item, scenario, searchPlan);
++}
++
++/**
++ * Core signal-matching logic, WITHOUT the entity-overlap gate check.
++ * Split out from scoreItemAgainstSignals so the second-chance recovery
++ * path (see secondChanceEntityOverlap / scoreArticles) can score an
++ * article that was recovered via the LLM classifier without re-running
++ * (and necessarily failing again) the cheap keyword-based overlap check
++ * that it already failed once.
++ */
++function scoreItemAgainstSignalsAssumingOverlap(item, scenario, searchPlan = null) {
+   const haystack = articleText(item);
+   const matchedSignals = [];
+   let weightedScore = 0;
+ 
+-  if (!hasScenarioEntityOverlap(item, scenario, searchPlan)) {
+-    return { matchedSignals, score: 0, weightedScore: 0 };
+-  }
+-
+   const searchPlanSignals = unique(searchPlan?.signals_to_track || []).map((text) => ({
+     text,
+     weight: DEFAULT_SIGNAL_WEIGHT
+@@ -1074,9 +1168,37 @@
+   return { matchedSignals: unique(matchedSignals), score: weightedScore, weightedScore };
+ }
+ 
+-function hasStrongRssTopicMatch(article, scenario, searchPlan = null) {
++function hasStrongRssTopicMatch(article, scenario, searchPlan = null, rawMatch = null) {
+   const haystack = articleText(article);
+ 
++  // A real signal match found by scoreItemAgainstSignals is more specific
++  // and reliable evidence of relevance than generic scenario-name/description
++  // token overlap (which only checks if the article happens to echo the
++  // user's own wording for the scenario, not whether it actually supports
++  // any signal). Previously this function ran independently of the actual
++  // match outcome, so a strongly-matched signal (e.g. "Republican candidate
++  // faces legal or campaign disruption" matched via aliasSignalMatch's
++  // legal-exposure branch) could still be discarded here for failing an
++  // unrelated, narrower token-overlap heuristic. If aliasSignalMatch (the
++  // higher-precision matcher) matched at least one signal, or token
++  // matching matched 2+ signals, treat that as sufficient on its own.
++  if (rawMatch) {
++    const matchedViaAlias = (rawMatch.matchedSignals || []).some((signalText) =>
++      aliasSignalMatch(signalText.toLowerCase(), haystack)
++    );
++    if (matchedViaAlias) return true;
++    if ((rawMatch.matchedSignals || []).length >= 2) return true;
++    // A single token-based match (not via the alias library) is weaker
++    // evidence than the two cases above, but still real evidence that
++    // scoreItemAgainstSignals already required 2+ specific content-word
++    // hits to produce. Accept it on its own if the matched signal carries
++    // above-default weight (6 or 9), since the person explicitly marked
++    // that signal as more important when building the scenario -- a
++    // single high-weight match deserves to reach the deterministic scorer
++    // rather than being silently discarded by this secondary gate.
++    if ((rawMatch.weightedScore || 0) >= 6) return true;
++  }
++
+   const scenarioTokens = tokenise(`${scenario.name} ${scenario.description}`)
+     .filter((token) => token.length >= 5)
+     .filter((token) => !STOP_WORDS.has(token))
+@@ -1127,15 +1249,193 @@
+       && (entityHits >= 1 || signalHits >= 2);
+   }
+ 
++  // Generic branch for any scenario name that isn't one of the hardcoded
++  // topics above. Previously this required (entityHits >= 1 || signalHits
++  // >= 2) unconditionally — but entityTokens/signalTokens are sourced from
++  // searchPlan.entities/.geographies/.industries/.signals_to_track, which
++  // are EMPTY whenever the search planner fails (see buildScenarioSearchPlan).
++  // That made this branch unconditionally false for any non-hardcoded
++  // scenario whenever the planner had a transient failure, rejecting every
++  // RSS article regardless of actual relevance. If there's no entity/signal
++  // vocabulary to check against, fall back to scenario-name/description
++  // token overlap alone, with a slightly higher bar to compensate for
++  // losing the second independent signal.
++  const hasEntitySignalVocabulary = entityTokens.length > 0 || signalTokens.length > 0;
++
++  if (!hasEntitySignalVocabulary) {
++    return scenarioHits >= 3;
++  }
++
+   return scenarioHits >= 2 && (entityHits >= 1 || signalHits >= 2);
+ }
+ 
+-function scoreArticles(articles, scenarios, searchPlan = null) {
+-  return dedupeArticles(articles).map((article) => {
++/**
++ * SECOND-CHANCE ENTITY-OVERLAP CHECK (LLM-based, batched, budget-capped)
++ * ------------------------------------------------------------------------
++ * hasScenarioEntityOverlap and hasStrongRssTopicMatch are deliberately
++ * cheap, deterministic, keyword-based gates -- fast, free, and they
++ * correctly reject the bulk of obviously irrelevant articles (sports,
++ * celebrity news, unrelated crime stories, etc). But they only recognise
++ * articles that literally share vocabulary with the scenario's own
++ * name/description/signal text. A genuinely relevant article phrased
++ * differently -- e.g. "Young voters are turning out in record numbers"
++ * for a signal worded "youth turnout rises" -- shares no anchor tokens
++ * and is rejected before signal-matching ever runs, regardless of how
++ * well the deterministic scorer might otherwise handle it.
++ *
++ * This function gives those near-miss articles ONE additional, batched
++ * classification pass. It does NOT set or influence any likelihood score
++ * -- it only answers "does this article plausibly relate to this
++ * scenario at all", the same binary the cheap heuristic was already
++ * trying to answer. Articles that pass this check still go through the
++ * exact same scoreItemAgainstSignals / hasStrongRssTopicMatch /
++ * deterministic-scoring path as everything else; this only unblocks them
++ * from the entity gate that would otherwise reject them outright.
++ *
++ * Cost control: only called on the subset of articles that (a) already
++ * failed the cheap entity-overlap gate, and (b) are otherwise still
++ * viable evidence (not too old, not a weak/explainer page). Capped at
++ * SECOND_CHANCE_MAX_ARTICLES per scenario per request, and is itself
++ * fully optional -- on any failure (no API key, timeout, malformed
++ * response) this simply returns no recoveries, so the rest of the
++ * pipeline behaves exactly as it did before this function existed.
++ */
++async function secondChanceEntityOverlap(candidateArticles, scenario, searchPlan) {
++  if (!openai || !candidateArticles.length) return new Set();
++
++  const capped = candidateArticles.slice(0, SECOND_CHANCE_MAX_ARTICLES);
++
++  const articlesPayload = capped.map((article, index) => ({
++    id: index,
++    title: cleanText(article.title, 200),
++    snippet: cleanText(article.snippet || article.contentSnippet || "", 280)
++  }));
++
++  const schema = {
++    type: "object",
++    additionalProperties: false,
++    properties: {
++      relevant_ids: { type: "array", items: { type: "number" } }
++    },
++    required: ["relevant_ids"]
++  };
++
++  try {
++    const response = await Promise.race([
++      openai.responses.create({
++        model: process.env.OPENAI_SECOND_CHANCE_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini",
++        input: [
++          {
++            role: "developer",
++            content: [
++              {
++                type: "input_text",
++                text: `You are a strict relevance classifier for a forecasting tool. You do NOT
++assess likelihood or write any forecast -- you only decide which articles
++are PLAUSIBLY RELATED to the given scenario and its signals, even if they
++use different wording than the signals themselves (e.g. "young voters
++turning out in record numbers" IS related to a signal worded "youth
++turnout rises"). Be conservative: a shared general topic area is not
++enough on its own, the article must plausibly bear on at least one of the
++specific signals listed. Return ONLY the JSON object described by the
++schema, with the ids of articles that pass this bar.`
++              }
++            ]
++          },
++          {
++            role: "user",
++            content: [
++              {
++                type: "input_text",
++                text: JSON.stringify({
++                  scenario_name: scenario.name,
++                  scenario_description: scenario.description,
++                  signals: getWeightedSignals(scenario).map((s) => s.text),
++                  articles: articlesPayload
++                }, null, 2)
++              }
++            ]
++          }
++        ],
++        temperature: 0,
++        max_output_tokens: 600,
++        text: {
++          format: {
++            type: "json_schema",
++            name: "second_chance_relevance",
++            schema,
++            strict: true
++          }
++        }
++      }),
++      new Promise((_, reject) => setTimeout(() => reject(new Error("second-chance classifier timed out")), SECOND_CHANCE_TIMEOUT_MS))
++    ]);
++
++    const parsed = JSON.parse(response.output_text || response.output?.[0]?.content?.[0]?.text || "{}");
++    const ids = Array.isArray(parsed.relevant_ids) ? parsed.relevant_ids : [];
++
++    // Map back from the capped-array index to the actual article object.
++    const recovered = new Set();
++    for (const id of ids) {
++      const article = capped[id];
++      if (article) recovered.add(article);
++    }
++    return recovered;
++  } catch (error) {
++    console.warn("[second-chance entity overlap] skipped due to error:", cleanText(error?.message || String(error), 200));
++    return new Set();
++  }
++}
++
++async function scoreArticles(articles, scenarios, searchPlan = null) {
++  const deduped = dedupeArticles(articles);
++
++  // For each scenario, identify articles that fail the cheap entity-overlap
++  // gate but are otherwise still viable evidence (not too old, not a weak/
++  // explainer page), and give them one batched second-chance classification
++  // pass. Run across scenarios IN PARALLEL (not sequentially) -- this
++  // endpoint has a 60s Vercel function timeout (see vercel.json), and with
++  // up to MAX_SCENARIOS=4 scenarios each taking up to SECOND_CHANCE_TIMEOUT_MS,
++  // running them one after another could approach or exceed that budget on
++  // top of the search-planner and feed-fetching time already spent earlier
++  // in the request. Recovered articles are tracked per-scenario so the main
++  // scoring loop below can treat them as having satisfied entity overlap,
++  // without changing anything else about how they're scored.
++  const recoveryEntries = await Promise.all(
++    scenarios.map(async (scenario) => {
++      const candidates = deduped.filter((article) => {
++        if (isTooOldForEvidence(article)) return false;
++        if (isWeakEvidencePage(article)) return false;
++        return !hasScenarioEntityOverlap(article, scenario, searchPlan);
++      });
++
++      const recovered = candidates.length
++        ? await secondChanceEntityOverlap(candidates, scenario, searchPlan)
++        : new Set();
++
++      return [scenario.name, recovered];
++    })
++  );
++
++  const recoveredByScenario = new Map(recoveryEntries);
++
++  return deduped.map((article) => {
+     const scenarioMatches = scenarios
+       .map((scenario) => {
+-        const rawMatch = scoreItemAgainstSignals(article, scenario, searchPlan);
+-        const contextMatched = hasScenarioContextOverlap(article, scenario, searchPlan);
++        const recoveredViaSecondChance = recoveredByScenario.get(scenario.name)?.has(article) || false;
++        const entityOverlapSatisfied = recoveredViaSecondChance || hasScenarioEntityOverlap(article, scenario, searchPlan);
++
++        // scoreItemAgainstSignals does its own internal entity-overlap
++        // check and returns a zero score if it fails. Since we've already
++        // determined entity overlap above (possibly via the second-chance
++        // recovery), short-circuit straight to a zero match here rather
++        // than re-running (and potentially failing) that check a second
++        // time with no knowledge of the recovery.
++        const rawMatch = entityOverlapSatisfied
++          ? scoreItemAgainstSignalsAssumingOverlap(article, scenario, searchPlan)
++          : { matchedSignals: [], score: 0, weightedScore: 0 };
++
++        const contextMatched = entityOverlapSatisfied;
+ 
+         const adjustedMatch = qualityAdjustedMatch(
+           article,
+@@ -1144,7 +1444,7 @@
+         );
+ 
+         const provider = String(article.searchProvider || "").toLowerCase();
+-        const rssStrongEnough = provider !== "rss" || hasStrongRssTopicMatch(article, scenario, searchPlan);
++        const rssStrongEnough = provider !== "rss" || hasStrongRssTopicMatch(article, scenario, searchPlan, rawMatch) || recoveredViaSecondChance;
+ 
+         const evidenceGatePassed =
+           adjustedMatch.score > 0
+@@ -1157,7 +1457,8 @@
+           scenario: scenario.name,
+           ...adjustedMatch,
+           contextMatched,
+-          evidenceGatePassed
++          evidenceGatePassed,
++          recovered_via_second_chance: recoveredViaSecondChance || undefined
+         };
+       })
+       .filter((match) => match.evidenceGatePassed);
+@@ -1174,8 +1475,8 @@
+   });
+ }
+ 
+-function selectArticlesForModel(articles, scenarios, searchPlan = null) {
+-  const scoredArticles = scoreArticles(articles, scenarios, searchPlan);
++async function selectArticlesForModel(articles, scenarios, searchPlan = null) {
++  const scoredArticles = await scoreArticles(articles, scenarios, searchPlan);
+ 
+   const rejectedTitles = scoredArticles
+     .filter((article) => article.total_signal_score <= 0)
+@@ -1588,7 +1889,7 @@
+   ]
+     .flatMap((result) => result.status === "fulfilled" ? result.value : []);
+ 
+-  const selectedArticles = selectArticlesForModel(allArticles, scenarios, searchPlan);
++  const selectedArticles = await selectArticlesForModel(allArticles, scenarios, searchPlan);
+   const assessment = await callModel({ scenarios, articles: selectedArticles, sources });
+ 
+   return sendJson(res, 200, {
+@@ -1632,7 +1933,9 @@
+       })),
+       retrieval_warning:
+         selectedArticles.length === 0
+-          ? "No scenario-relevant evidence was selected. Tavily may have failed, sources may be too generic, or filtering may be too strict."
++          ? (searchPlan.planner_status === "failed"
++              ? `No scenario-relevant evidence was selected. The search-planning step failed (${searchPlan.planner_error || "unknown error"}), which significantly narrows article matching for non-standard scenarios — consider re-running.`
++              : "No scenario-relevant evidence was selected. Tavily may have failed, sources may be too generic, or filtering may be too strict.")
+           : null,
+       tavily_article_count: tavilyArticleCount,
+ google_news_fallback_count: googleNewsFallbackArticles.length,
