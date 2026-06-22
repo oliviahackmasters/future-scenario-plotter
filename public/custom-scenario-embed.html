@@ -28,10 +28,10 @@
     #hmScenarioPlotter .hm-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 14px}
     #hmScenarioPlotter .scenario-grid{display:grid;grid-template-columns:minmax(150px,.45fr) minmax(0,1fr) minmax(0,1fr) 118px;gap:12px;margin:0 0 14px;width:100%;min-width:0;align-items:stretch}
     #hmScenarioPlotter .scenario-row{display:contents}
-    #hmScenarioPlotter .go{grid-column:4;grid-row:1 / span 4;min-height:212px}
+    #hmScenarioPlotter .go{min-height:96px}
     #hmScenarioPlotter .hm-card,#hmScenarioPlotter .result-card,#hmScenarioPlotter .source-line,#hmScenarioPlotter .sources-title,#hmScenarioPlotter .source-editor,#hmScenarioPlotter .evidence{border:1px solid var(--hm-copper);background:rgba(255,255,255,.01);padding:14px;min-width:0}
     #hmScenarioPlotter .section-label,#hmScenarioPlotter .source-editor summary,#hmScenarioPlotter .result-card strong{margin:0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--hm-white)}
-    #hmScenarioPlotter .results{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;width:100%;max-width:100%;min-width:0;margin:0 0 14px}
+    #hmScenarioPlotter .results{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;width:100%;max-width:100%;min-width:0;margin:0 0 14px}
     #hmScenarioPlotter .result-card{min-height:120px;display:flex;align-items:flex-start;justify-content:flex-start;text-align:left;color:var(--hm-white);overflow-wrap:anywhere;word-break:break-word}
     #hmScenarioPlotter .result-card span,#hmScenarioPlotter .result-card p{font-size:13px;line-height:1.5;margin:0 0 8px}
     #hmScenarioPlotter .source-evidence-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;margin:0 0 14px;width:100%}
@@ -50,7 +50,7 @@
     #hmScenarioPlotter .small{font-size:12px;line-height:1.5;color:rgba(255,255,255,.62);font-weight:400;text-transform:none;letter-spacing:0;margin:8px 0 0}
     #hmScenarioPlotter .evidence-item{border-top:1px solid rgba(209,128,87,.45);padding:10px 0 0;margin:10px 0 0;overflow-wrap:anywhere;word-break:break-word}
     @media(max-width:1050px){#hmScenarioPlotter .source-evidence-row{grid-template-columns:1fr}#hmScenarioPlotter .sources{grid-template-columns:minmax(0,1fr) 150px}}
-    @media(max-width:900px){#hmScenarioPlotter .scenario-grid{grid-template-columns:1fr}#hmScenarioPlotter .scenario-row{display:grid;grid-template-columns:1fr;gap:8px}#hmScenarioPlotter .go{grid-column:auto;grid-row:auto;min-height:44px}#hmScenarioPlotter .results{grid-template-columns:repeat(2,minmax(0,1fr))}#hmScenarioPlotter .source-editor-grid{grid-template-columns:1fr}}
+    @media(max-width:900px){#hmScenarioPlotter .scenario-grid{grid-template-columns:1fr}#hmScenarioPlotter .scenario-row{display:grid;grid-template-columns:1fr;gap:8px}#hmScenarioPlotter .go{min-height:44px}#hmScenarioPlotter .source-editor-grid{grid-template-columns:1fr}}
     @media(max-width:560px){#hmScenarioPlotter .hm-wrap{padding:14px}#hmScenarioPlotter .results{grid-template-columns:1fr}#hmScenarioPlotter .sources{grid-template-columns:1fr}}
   </style>
 </head>
@@ -61,7 +61,7 @@
         <h1 class="hm-title"><span class="hm-badge">Hackmasters</span> Scenario Plotter</h1>
         <div class="hm-status">Done</div>
       </div>
-      <p class="hm-sub">Enter scenarios, add signal lists, and ask questions grounded in selected feeds and Tavily web domains.</p>
+      <p class="hm-sub">Enter one scenario, add signal lists, and assess it against selected feeds and Tavily web domains.</p>
       <div class="hm-toolbar"><button type="button" id="new-session">New session</button></div>
       <div class="scenario-grid" id="scenario-grid"></div>
       <div class="results" id="results"></div>
@@ -175,16 +175,14 @@
       }
       function renderScenarios(){
         scenarioGrid.innerHTML='';
-        for(let i=0;i<4;i+=1){
-          const row=document.createElement('div');
-          row.className='scenario-row';
-          row.innerHTML=`<textarea class="scenario-name" id="scenario-name-${i}" placeholder="${i===0?'Scenario name':'Scenario name (optional)'}"></textarea><textarea class="scenario-description" id="scenario-${i}" placeholder="${i===0?'Describe scenario':`Describe scenario ${i+1} (optional)`}"></textarea><textarea class="scenario-signals" id="signals-${i}" placeholder="List signals"></textarea>`;
-          scenarioGrid.appendChild(row);
-          row.querySelectorAll('textarea').forEach((textarea)=>{
-            textarea.addEventListener('input',()=>autoGrow(textarea));
-            autoGrow(textarea);
-          });
-        }
+        const row=document.createElement('div');
+        row.className='scenario-row';
+        row.innerHTML=`<textarea class="scenario-name" id="scenario-name-0" placeholder="Scenario name"></textarea><textarea class="scenario-description" id="scenario-0" placeholder="Describe scenario"></textarea><textarea class="scenario-signals" id="signals-0" placeholder="List signals"></textarea>`;
+        scenarioGrid.appendChild(row);
+        row.querySelectorAll('textarea').forEach((textarea)=>{
+          textarea.addEventListener('input',()=>autoGrow(textarea));
+          autoGrow(textarea);
+        });
         const go=document.createElement('button');
         go.className='go primary';
         go.id='go';
@@ -194,18 +192,16 @@
         scenarioGrid.appendChild(go);
         postHeight();
       }
-      function renderEmptyResults(){
+            function renderEmptyResults(){
         results.innerHTML='';
-        for(let i=0;i<4;i+=1){
-          const card=document.createElement('div');
-          card.className='result-card';
-          card.id=`result-${i}`;
-          card.innerHTML=i===0?'<span><strong>Scenario likelihood</strong><br>%</span>':`<span><strong>Scenario ${i+1} likelihood</strong><br>%<br><span class="small">if entered</span></span>`;
-          results.appendChild(card);
-        }
+        const card=document.createElement('div');
+        card.className='result-card';
+        card.id='result-0';
+        card.innerHTML='<span><strong>Scenario likelihood</strong><br>%</span>';
+        results.appendChild(card);
         postHeight();
       }
-      function renderAvailableSources(){
+            function renderAvailableSources(){
         const enabledCount=state.sources.filter(source=>source.enabled).length;
         availableSources.innerHTML=`<div class="sources-title hm-card"><div><div class="section-label">Available sources to search</div><p class="small">${enabledCount} of ${state.sources.length} selected. Custom Tavily sources are global, not per-device.</p></div></div>`;
         state.sources.forEach((source,index)=>{
@@ -281,19 +277,16 @@
   postHeight();
 }
       function collectScenarios(){
-        const scenarios=[];
-        for(let i=0;i<4;i+=1){
-          const shortName=document.getElementById(`scenario-name-${i}`).value.trim();
-          const description=document.getElementById(`scenario-${i}`).value.trim();
-          const signals=document.getElementById(`signals-${i}`).value.split(/[\n,;]+/).map(item=>item.trim()).filter(Boolean);
-          if((shortName||description)&&signals.length){
-            const fallbackName=description?description.slice(0,80):`Scenario ${i+1}`;
-            scenarios.push({name:(shortName||fallbackName).slice(0,80),description:description||shortName,signals});
-          }
+        const shortName=document.getElementById('scenario-name-0').value.trim();
+        const description=document.getElementById('scenario-0').value.trim();
+        const signals=document.getElementById('signals-0').value.split(/[\n,;]+/).map(item=>item.trim()).filter(Boolean);
+        if((shortName||description)&&signals.length){
+          const fallbackName=description?description.slice(0,80):'Scenario';
+          return [{name:(shortName||fallbackName).slice(0,80),description:description||shortName,signals}];
         }
-        return scenarios;
+        return [];
       }
-      async function assess(){
+            async function assess(){
         const scenarios=collectScenarios();
         if(!scenarios.length){status.textContent='Enter at least one scenario name or description, plus at least one signal.';postHeight();return}
         const selectedSources=state.sources.filter(source=>source.enabled);
@@ -310,20 +303,16 @@
         }catch(error){status.textContent=error.message||'Assessment failed.'}finally{go.disabled=false;postHeight()}
       }
       function renderAssessment(data,scenarios){
-        const byName=new Map();
-        (data.scenario_scores||[]).forEach(score=>byName.set(score.scenario,score));
-        for(let i=0;i<4;i+=1){
-          const card=document.getElementById(`result-${i}`);const scenario=scenarios[i];
-          if(!scenario){card.innerHTML=`<span><strong>Scenario not entered</strong><br><br><span class="small">Add a scenario name, description, and signals to compare likelihood.</span></span>`;continue}
-          const score=byName.get(scenario.name)||data.scenario_scores?.[i];
-          const likelihoodHtml=score?.likelihood_percent===null?`<strong style="color:var(--hm-copper)">INSUFFICIENT EVIDENCE</strong><br><span class="small">Not enough relevant evidence found to assess this scenario.</span>`:`${Math.round(score?.likelihood_percent||0)}%`;
-          card.innerHTML=`<span><strong>${escapeHtml(scenario.name)}</strong><br>${likelihoodHtml}<br><span class="small">${escapeHtml(score?.rationale||'')}</span></span>`;
-        }
+        const card=document.getElementById('result-0');
+        const scenario=scenarios[0];
+        const score=(data.scenario_scores||[]).find(item=>item.scenario===scenario.name)||data.scenario_scores?.[0];
+        const likelihoodHtml=score?.likelihood_percent===null?`<strong style="color:var(--hm-copper)">INSUFFICIENT EVIDENCE</strong><br><span class="small">Not enough relevant evidence found to assess this scenario.</span>`:`${Math.round(score?.likelihood_percent||0)}%`;
+        card.innerHTML=`<span><strong>${escapeHtml(scenario.name)}</strong><br>${likelihoodHtml}<br><span class="small">${escapeHtml(score?.rationale||'')}</span></span>`;
         renderAvailableSources();
         renderEvidenceUsed(data);
         postHeight();
       }
-      function escapeHtml(value){return String(value||'').replace(/[&<>"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]))}
+            function escapeHtml(value){return String(value||'').replace(/[&<>"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]))}
       function escapeAttr(value){return escapeHtml(value).replace(/'/g,'&#039;')}
       function normaliseDomainInput(value){
         const raw=String(value||'').trim();
@@ -352,7 +341,11 @@
         }catch(error){status.textContent=error.message||'Could not save source globally.'}finally{postHeight()}
       });
       document.getElementById('new-session').addEventListener('click',()=>{
-        for(let i=0;i<4;i+=1){document.getElementById(`scenario-name-${i}`).value='';document.getElementById(`scenario-${i}`).value='';const textarea=document.getElementById(`signals-${i}`);textarea.value='';autoGrow(textarea)}
+        document.getElementById('scenario-name-0').value='';
+        document.getElementById('scenario-0').value='';
+        const textarea=document.getElementById('signals-0');
+        textarea.value='';
+        autoGrow(textarea);
         status.textContent='New session started.';evidenceUsed.innerHTML='';renderEmptyResults();postHeight();
       });
       if('ResizeObserver' in window){new ResizeObserver(()=>postHeight()).observe(document.getElementById('hmScenarioPlotter'))}
