@@ -49,6 +49,12 @@
     #hmScenarioPlotter .evidence a{color:var(--hm-white);text-decoration:underline;text-decoration-color:var(--hm-copper)}
     #hmScenarioPlotter .small{font-size:12px;line-height:1.5;color:rgba(255,255,255,.62);font-weight:400;text-transform:none;letter-spacing:0;margin:8px 0 0}
     #hmScenarioPlotter .evidence-item{border-top:1px solid rgba(209,128,87,.45);padding:10px 0 0;margin:10px 0 0;overflow-wrap:anywhere;word-break:break-word}
+    #hmScenarioPlotter .loader-radar{width:84px;height:84px;margin:8px auto 10px;border-radius:50%;position:relative;overflow:hidden;background:radial-gradient(circle at 50% 50%, rgba(209,128,87,.24), transparent 60%),radial-gradient(circle at 50% 50%, rgba(255,255,255,.06) 2px, transparent 2px),radial-gradient(circle at 50% 50%, rgba(255,255,255,.06) 4px, transparent 4px);box-shadow:inset 0 0 0 2px rgba(209,128,87,.65),0 0 20px rgba(209,128,87,.08)}
+    #hmScenarioPlotter .loader-radar::after{content:"";position:absolute;inset:-10%;background:conic-gradient(from 0deg,rgba(209,128,87,0),rgba(209,128,87,.45));animation:hmRadarSweep 2s linear infinite}
+    #hmScenarioPlotter .result-card.loading{align-items:center;justify-content:center;text-align:center}
+    #hmScenarioPlotter .result-card:not(.loading)>span{width:100%;text-align:left}
+    #hmScenarioPlotter .result-loading-text{display:block;font-size:12px;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.78)}
+    @keyframes hmRadarSweep{to{transform:rotate(360deg)}}
     @media(max-width:1050px){#hmScenarioPlotter .source-evidence-row{grid-template-columns:1fr}#hmScenarioPlotter .sources{grid-template-columns:minmax(0,1fr) 150px}}
     @media(max-width:900px){#hmScenarioPlotter .scenario-grid{grid-template-columns:1fr}#hmScenarioPlotter .scenario-row{display:grid;grid-template-columns:1fr;gap:8px}#hmScenarioPlotter .go{min-height:44px}#hmScenarioPlotter .source-editor-grid{grid-template-columns:1fr}}
     @media(max-width:560px){#hmScenarioPlotter .hm-wrap{padding:14px}#hmScenarioPlotter .results{grid-template-columns:1fr}#hmScenarioPlotter .sources{grid-template-columns:1fr}}
@@ -201,6 +207,24 @@
         results.appendChild(card);
         postHeight();
       }
+      function renderLoadingResult(){
+        results.innerHTML='';
+        const card=document.createElement('div');
+        card.className='result-card loading';
+        card.id='result-0';
+        card.innerHTML='<div><div class="loader-radar" aria-label="Generating scenario assessment"></div><span class="result-loading-text">Scanning selected feeds and Tavily domains...</span></div>';
+        results.appendChild(card);
+        postHeight();
+      }
+      function renderErrorResult(message){
+        results.innerHTML='';
+        const card=document.createElement('div');
+        card.className='result-card';
+        card.id='result-0';
+        card.innerHTML=`<span><strong>Assessment failed</strong><br><span class="small">${escapeHtml(message||'Assessment failed.')}</span></span>`;
+        results.appendChild(card);
+        postHeight();
+      }
             function renderAvailableSources(){
         const enabledCount=state.sources.filter(source=>source.enabled).length;
         availableSources.innerHTML=`<div class="sources-title hm-card"><div><div class="section-label">Available sources to search</div><p class="small">${enabledCount} of ${state.sources.length} selected. Custom Tavily sources are global, not per-device.</p></div></div>`;
@@ -292,7 +316,7 @@
         const selectedSources=state.sources.filter(source=>source.enabled);
         if(!selectedSources.length){status.textContent='Select at least one feed or Tavily domain.';postHeight();return}
         const go=document.getElementById('go');
-        go.disabled=true;status.textContent='Scanning selected feeds and Tavily domains...';evidenceUsed.innerHTML='';postHeight();
+        go.disabled=true;status.textContent='Scanning selected feeds and Tavily domains...';evidenceUsed.innerHTML='';renderLoadingResult();postHeight();
         try{
           const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenarios,sources:selectedSources})});
           const data=await response.json();
@@ -300,13 +324,14 @@
           state.latest=data;renderAssessment(data,scenarios);
           console.log('SCENARIO DEBUG', data.debug);
           status.textContent=`Assessment complete. Confidence: ${data.confidence||'low'}.`;
-        }catch(error){status.textContent=error.message||'Assessment failed.'}finally{go.disabled=false;postHeight()}
+        }catch(error){const message=error.message||'Assessment failed.';status.textContent=message;renderErrorResult(message)}finally{go.disabled=false;postHeight()}
       }
       function renderAssessment(data,scenarios){
         const card=document.getElementById('result-0');
         const scenario=scenarios[0];
         const score=(data.scenario_scores||[]).find(item=>item.scenario===scenario.name)||data.scenario_scores?.[0];
         const likelihoodHtml=score?.likelihood_percent===null?`<strong style="color:var(--hm-copper)">INSUFFICIENT EVIDENCE</strong><br><span class="small">Not enough relevant evidence found to assess this scenario.</span>`:`${Math.round(score?.likelihood_percent||0)}%`;
+        card.className='result-card';
         card.innerHTML=`<span><strong>${escapeHtml(scenario.name)}</strong><br>${likelihoodHtml}<br><span class="small">${escapeHtml(score?.rationale||'')}</span></span>`;
         renderAvailableSources();
         renderEvidenceUsed(data);
