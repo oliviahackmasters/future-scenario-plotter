@@ -925,7 +925,7 @@
       </div>
 
       <p class="hm-sub">
-        AI scans selected sources, extracts live signals, and weights four predefined geopolitical futures to show which scenario is most likely right now.
+        AI reviews selected reporting and available signals to compare how closely four scenarios fit the evidence.
       </p>
 <section class="hm-card hm-refresh-row">
   <button class="hm-btn" id="hmRefreshBtn">Refresh analysis</button>
@@ -935,7 +935,9 @@
 
 
   <section class="hm-card">
-    <div class="hm-msg-title">Scenario likelihoods</div>
+    <div class="hm-msg-title">Relative scenario scores</div>
+    <p class="hm-note">Scores sum to 100 and show relative fit to the available evidence. They are not calibrated probabilities. No forecast horizon is specified.</p>
+    <p class="hm-note" id="hmEvidenceCoverage"></p>
 
     <div class="hm-loader" id="hmLoader">
       <div class="hm-loader-radar"></div>
@@ -943,9 +945,9 @@
     </div>
 
     <div class="hm-timeline-card" id="hmTimelineCard">
-      <div class="hm-msg-title">Prediction timeline</div>
+      <div class="hm-msg-title">Scenario score timeline</div>
       <div class="hm-note hm-timeline-note" id="hmTimelineNote">Historical score data is stored locally each day.</div>
-      <div class="hm-timeline-summary" id="hmTimelineSummary">Latest daily trend for core scenario probabilities.</div>
+      <div class="hm-timeline-summary" id="hmTimelineSummary">Latest daily trend for relative scenario scores.</div>
       <div class="hm-timeline-legend" id="hmTimelineLegend"></div>
       <div class="hm-timeline-graph" id="hmTimelineGraph">
         <svg viewBox="0 0 720 280" preserveAspectRatio="xMidYMid meet"></svg>
@@ -1440,7 +1442,7 @@ const HM_SCENARIO_COLORS = {
     }
 
     if (!biggestMove) {
-      return "Latest daily trend for core scenario probabilities.";
+      return "Latest daily trend for relative scenario scores.";
     }
 
     if (biggestMove.delta === 0) {
@@ -1601,7 +1603,7 @@ ${p.summary || ""}</title>
       <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${baselineY}" stroke="rgba(255,255,255,0.22)" stroke-width="1.2" />
       ${areas}
       ${xLabels}
-      <text x="22" y="${margin.top + innerHeight / 2}" transform="rotate(-90 22 ${margin.top + innerHeight / 2})" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="12">SCENARIO LIKELIHOOD (%)</text>
+      <text x="22" y="${margin.top + innerHeight / 2}" transform="rotate(-90 22 ${margin.top + innerHeight / 2})" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="12">RELATIVE SCENARIO SCORE (%)</text>
       <text x="${margin.left + innerWidth / 2}" y="${height - 4}" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="12">DATE</text>
     `;
 
@@ -1629,7 +1631,7 @@ async function hmRefreshAssessment() {
       throw new Error(data.message || `Refresh failed with status ${res.status}`);
     }
 
-    await loadAssessment();
+    render(data);
   } catch (err) {
     error.style.display = "block";
     error.textContent = err.message || "Failed to refresh assessment.";
@@ -1750,6 +1752,14 @@ const calcPanel = document.getElementById("hmCalcPanel");
 
     function render(data) {
       renderCalculation(data.calculation);
+      const coverage = data.meta?.source_coverage || [];
+      const checked = coverage.filter(source => source.status !== "not_requested");
+      const used = data.meta?.used_article_sources || [];
+      document.getElementById("hmEvidenceCoverage").textContent =
+        `${data.meta?.article_count ?? "Unknown number of"} articles used from ${used.length} publishers. ` +
+        (coverage.length ? `${checked.length} of ${coverage.length} configured RSS feeds checked; ${checked.filter(source => source.status === "error").length} unavailable. ` : "Feed coverage unavailable for this saved assessment. ") +
+        (data.mode === "fallback" || data.mode === "no_evidence" ? "Insufficient evidence or model unavailable; these are placeholder scores. " : "") +
+        "Evidence is based on headlines, snippets and the external signals listed below.";
       
       scenarioGrid.innerHTML = (data.scenarios || []).map(item => `
         <div class="hm-result-card">
@@ -1783,7 +1793,7 @@ const calcPanel = document.getElementById("hmCalcPanel");
           <div>
             <span class="hm-pill ${directionClass(signal.direction)}">${signal.direction}</span>
           </div>
-          <div class="hm-confidence">Confidence: ${signal.confidence}</div>
+          <div class="hm-confidence">${signal.evidence_status === "insufficient" ? "Evidence: insufficient / unknown" : `Confidence: ${signal.confidence}`}</div>
         </div>
       `).join("");
 
