@@ -25,7 +25,9 @@ const parser = new Parser();
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const RSS_FETCH_TIMEOUT_MS        = 3500;
+// Parallel feed reads share the same eight-second window as other news APIs.
+const RSS_FETCH_TIMEOUT_MS        = 8000;
+const MAX_RSS_FEEDS_PER_REFRESH   = 40;
 const JSON_FETCH_TIMEOUT_MS       = 8000;
 const OPENAI_TIMEOUT_FALLBACK_MS  = 22000;
 const MAX_ITEMS_PER_FEED          = 8;   // was 6
@@ -857,7 +859,9 @@ const rssSources = uniqueSources.filter(
     !isBlockedOrBrokenSource(source, source.isUserAdded)
 );
 
-const liveRssSources = rssSources.slice(0, 5);
+// Check the current 34-feed source pack in one parallel batch, with headroom
+// for manually added feeds. The cap bounds fan-out without serial timeout costs.
+const liveRssSources = rssSources.slice(0, MAX_RSS_FEEDS_PER_REFRESH);
 
 console.log("RSS SOURCES:", rssSources.map((s) => `${s.name}${s.isUserAdded ? " [user]" : ""}`));
 
