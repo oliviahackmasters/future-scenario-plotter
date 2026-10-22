@@ -15,12 +15,10 @@
 import Parser from "rss-parser";
 import OpenAI from "openai";
 import {
-  loadAssessmentHistory,
   saveAssessmentHistory,
   saveLatestAssessment
 } from "../lib/blob-store.js";
 import { getMergedSavedSources } from "../lib/source-store.js";
-import { discoverFeedFromWebsite } from "../lib/feed-discovery.js";
 
 const parser = new Parser();
 
@@ -367,14 +365,13 @@ async function callOpenAIJsonWithRetry({
   topicConfig,
   prompt,
   timeoutMs = OPENAI_TIMEOUT_FALLBACK_MS,
-  maxRetries = 1
+  maxRetries = 0
 }) {
   let lastError = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      const response = await Promise.race([
-        openai.responses.create({
+      const response = await openai.responses.create({
           model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
           input: [
             {
@@ -401,14 +398,11 @@ async function callOpenAIJsonWithRetry({
               strict: true
             }
           }
-        }),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`OpenAI request exceeded ${timeoutMs}ms.`)),
-            timeoutMs
-          )
-        )
-      ]);
+        }, {
+          timeout: timeoutMs,
+          maxRetries: 0,
+          signal: AbortSignal.timeout(timeoutMs)
+        });
 
       const parsed = safeParseModelJson(response);
       return parsed;
@@ -547,6 +541,20 @@ function startTimer(label) { return { label, startedAt: Date.now() }; }
 function endTimer(timer) {
   if (!timer?.label || !timer?.startedAt) return;
   console.log(`${timer.label}: ${(Date.now() - timer.startedAt).toFixed(1)}ms`);
+}
+
+async function withinBudget(promise, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} exceeded ${ms}ms`)), ms);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function withTimeout(ms) {
@@ -702,17 +710,7 @@ async function fetchRssItems(source, topicConfig) {
     return await fetchFromUrl(source.url, "direct");
   } catch (error) {
     console.error(`Failed to fetch ${source.name} from direct URL:`, error.message);
-    if (source.homepage) {
-      try {
-        const discovery = await discoverFeedFromWebsite(source.homepage);
-        if (discovery.ok && discovery.source.feedUrl && discovery.source.feedUrl !== source.url) {
-          console.log(`Discovered alternate feed for ${source.name}: ${discovery.source.feedUrl}`);
-          return await fetchFromUrl(discovery.source.feedUrl, "discovered");
-        }
-      } catch (fallbackError) {
-        console.error(`Feed discovery failed for ${source.name}:`, fallbackError.message);
-      }
-    }
+    // Feed discovery belongs in source setup, outside the refresh time budget.
     return [];
   }
 }
@@ -1345,10 +1343,10 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
       topicConfig,
       prompt,
       timeoutMs: OPENAI_TIMEOUT_FALLBACK_MS,
-      maxRetries: 1
+      maxRetries: 0
     });
   } catch (error) {
-    console.error("OpenAI scenario generation failed after retry:", error.message);
+    console.error("OpenAI scenario generation failed:", error.message);
     return buildFallbackAssessment(
       topicConfig,
       articles,
@@ -1426,7 +1424,11 @@ export default async function handler(req, res) {
     const topicConfig = getTopicConfig(topic);
 
     const savedSourcesTimer = startTimer("load-saved-sources");
-    const savedSources = await getMergedSavedSources(topic);
+    const savedSources = await withinBudget(getMergedSavedSources(topic), 6500, "Saved sources")
+      .catch((error) => {
+        console.error(error.message);
+        return [];
+      });
     endTimer(savedSourcesTimer);
 
     const coverageTimer  = startTimer("collect-topic-coverage");
@@ -1509,18 +1511,15 @@ const responsePayload = {
 };
 
 
-try {
-  await saveLatestAssessment(topic, responsePayload);
-} catch (error) {
-  console.error("Unable to save latest assessment:", error.message);
+// Persist in parallel so slow Blob storage cannot consume the remaining request.
+const persistence = await Promise.allSettled([
+  withinBudget(saveLatestAssessment(topic, responsePayload), 6000, "Save latest"),
+  withinBudget(saveAssessmentHistory(topic, historyEntry), 6000, "Save history")
+]);
+for (const result of persistence) {
+  if (result.status === "rejected") console.error("Assessment persistence failed:", result.reason.message);
 }
-
-try {
-  history = await saveAssessmentHistory(topic, historyEntry);
-} catch (error) {
-  console.error("Unable to save assessment history:", error.message);
-  history = await loadAssessmentHistory(topic);
-}
+if (persistence[1].status === "fulfilled") history = persistence[1].value;
 
 responsePayload.history = Array.isArray(history) ? history.slice(-30) : [];
 
