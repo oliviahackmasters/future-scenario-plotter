@@ -12,7 +12,7 @@
  *  7. collectTopicCoverage() merges RSS + NewsAPI + WorldMonitor.
  */
 
-import { SCORE_DESCRIPTION, relativeScores, completeSignals, monthlyOilSignal } from "../lib/scenario-evidence.js";
+import { SCORE_DESCRIPTION, relativeScores, completeSignals, monthlyOilSignal, selectEvidenceArticles } from "../lib/scenario-evidence.js";
 import Parser from "rss-parser";
 import OpenAI from "openai";
 import {
@@ -32,8 +32,6 @@ const JSON_FETCH_TIMEOUT_MS       = 8000;
 const OPENAI_TIMEOUT_FALLBACK_MS  = 22000;
 const MAX_ITEMS_PER_FEED          = 8;   // was 6
 const MAX_ARTICLES_FOR_MODEL      = 12;
-const MAX_FILTERED_ITEMS          = 24;
-const MIN_MATCHES_REQUIRED        = 2;
 
 // ── Topic Configurations ───────────────────────────────────────────────────────
 // Each topic is a self-contained config. Add new topics here as the tool grows.
@@ -658,39 +656,6 @@ function normalizeSourceUrl(raw) {
 
 // ── Keyword matching ───────────────────────────────────────────────────────────
 
-function isRelevantToTopic(item, topicConfig) {
-  const title = String(item.title || "").toLowerCase();
-  const snippet = String(item.contentSnippet || "").toLowerCase();
-  const haystack = `${title} ${snippet}`;
-
-  const primaryTerms = topicConfig.keywordFilter.slice(0, 8);
-  const primaryHits = primaryTerms.filter((term) => haystack.includes(term)).length;
-  const allHits = topicConfig.keywordFilter.filter((term) => haystack.includes(term)).length;
-
-  if (primaryHits >= 1) return true;
-  if (allHits >= 3) return true;
-
-  return false;
-}
-
-function scoreAndSort(items, savedSourceNames = [], topicConfig) {
-  return items
-    .map((item) => {
-      const haystack = `${item.title} ${item.contentSnippet}`.toLowerCase();
-      let matches = 0;
-      for (const keyword of topicConfig.keywordFilter) {
-        if (haystack.includes(keyword)) matches += 1;
-      }
-      const savedBoost  = savedSourceNames.includes(item.source) ? 0.75 : 0;
-      const titleBoost  = topicConfig.keywordFilter.slice(0, 3).some((t) => item.title?.toLowerCase().includes(t)) ? 1 : 0;
-      const score = matches + savedBoost + titleBoost;
-      return { ...item, _matches: matches, _score: score };
-    })
-    .filter((item) => item._matches >= MIN_MATCHES_REQUIRED || savedSourceNames.includes(item.source))
-    .filter((item) => isRelevantToTopic(item, topicConfig) || savedSourceNames.includes(item.source))
-    .sort((a, b) => b._score - a._score || (b.isoDate || "").localeCompare(a.isoDate || ""));
-}
-
 // ── RSS Fetching ───────────────────────────────────────────────────────────────
 
 async function fetchRssItems(source, topicConfig) {
@@ -809,29 +774,6 @@ async function fetchWorldMonitorArticles(topicConfig) {
 
 // ── Coverage Aggregation ───────────────────────────────────────────────────────
 
-function ensureSavedSourcePresence(scoredItems, savedSourceNames = [], maxTotal = MAX_FILTERED_ITEMS) {
-  const result = [];
-  const usedUrls = new Set();
-
-  for (const sourceName of savedSourceNames) {
-    const match = scoredItems.find((item) => item.source === sourceName && !usedUrls.has(item.url));
-    if (match) {
-      result.push(match);
-      usedUrls.add(match.url);
-    }
-  }
-
-  for (const item of scoredItems) {
-    if (result.length >= maxTotal) break;
-    if (!usedUrls.has(item.url)) {
-      result.push(item);
-      usedUrls.add(item.url);
-    }
-  }
-
-  return result.slice(0, maxTotal);
-}
-
 async function collectTopicCoverage(topicConfig, savedSources = []) {
   const defaultSources = Array.isArray(topicConfig.sources) ? topicConfig.sources : [];
   const extraSources   = Array.isArray(savedSources) ? savedSources.filter((s) => s.enabled !== false) : [];
@@ -880,10 +822,7 @@ const [rssGroups, newsApiItems, worldMonitorItems] = await Promise.all([
 
   console.log(`Articles after dedup: ${dedupedByTitle.length} (from ${flattened.length} raw)`);
 
-  const savedSourceNames = extraSources.map((s) => s.name);
-  const scored   = scoreAndSort(dedupedByTitle, savedSourceNames, topicConfig);
-  const filtered = ensureSavedSourcePresence(scored, savedSourceNames, MAX_FILTERED_ITEMS);
-  const shortlisted = filtered.slice(0, MAX_ARTICLES_FOR_MODEL);
+  const shortlisted = selectEvidenceArticles(dedupedByTitle, topicConfig, MAX_ARTICLES_FOR_MODEL);
 
   console.log("FINAL ARTICLES:", shortlisted.map((item) => `[${item.source}] ${item.title}`));
 

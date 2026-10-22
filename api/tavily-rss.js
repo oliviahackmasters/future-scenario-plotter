@@ -72,7 +72,7 @@ export default async function handler(req, res) {
         <title>${escapeXml(article.title)}</title>
         <link>${escapeXml(article.url)}</link>
         <guid>${escapeXml(article.url)}</guid>
-        <pubDate>${escapeXml(article.published_at || new Date().toUTCString())}</pubDate>
+        ${article.published_at ? `<pubDate>${escapeXml(article.published_at)}</pubDate>` : ""}
         <description>${escapeXml(article.snippet || article.contentSnippet || "")}</description>
         <source>${escapeXml(article.source || domain || "Tavily")}</source>
       </item>`).join("\n");

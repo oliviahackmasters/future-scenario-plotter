@@ -110,3 +110,22 @@ for (const stalled of [false, true]) {
 }
 
 }
+
+test('search RSS preserves real publication dates and leaves unknown dates unstamped', async () => {
+  const mod = await load('api/tavily-rss.js', {
+    '../lib/tavily-search.js': {
+      buildScenarioSearchQuery: () => 'Iran',
+      fetchTavilyArticles: async () => [
+        { title: 'Undated Iran oil report', url: 'https://test.com/undated', snippet: 'Oil & shipping' },
+        { title: 'Dated Iran oil report', url: 'https://test.com/dated', published_at: '2026-10-21', snippet: 'Iran oil' }
+      ]
+    }
+  });
+  let status, body;
+  const res = { setHeader() { return this; }, status(value) { status = value; return this; }, send(value) { body = value; } };
+  await mod.default({ method: 'GET', query: { topic: 'iran' } }, res);
+  assert.equal(status, 200);
+  assert.equal((body.match(/<pubDate>/g) || []).length, 1);
+  assert.match(body, /<pubDate>2026-10-21<\/pubDate>/);
+  assert.match(body, /Oil &amp; shipping/);
+});
