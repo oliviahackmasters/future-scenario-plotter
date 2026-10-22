@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
 async function load(file, dependencies, globals = {}) {
+  dependencies["../lib/scenario-evidence.js"] = await import("../lib/scenario-evidence.js");
   const context = vm.createContext({
     console: { log() {}, warn() {}, error() {} }, process: { env: {
       OPENAI_API_KEY: 'test', BLOB_READ_WRITE_TOKEN: 'test', REDIS_URL: 'redis://test'
@@ -58,11 +59,11 @@ test('a connected Redis server that stops replying cannot stall saved sources', 
 });
 
 for (const stalled of [false, true]) {
-  test(`refresh returns with stalled feeds, storage and ${stalled ? 'stalled' : 'successful'} model`, async () => {
+  test(`refresh returns with stalled external APIs, storage and ${stalled ? 'stalled' : 'successful'} model`, async () => {
     let modelCalls = 0;
-    const model = { summary: 'Evidence assessment', scenarios: [], signals: [], calculation: { scenarios: [] } };
+    const model = { summary: 'Evidence assessment', scenarios: ['Chaos + Collapse', 'Shattered Diplomacy', 'Burning Strait', 'Cold Containment'].map(name => ({ name, score: 25 })), signals: [], calculation: { scenarios: [] } };
     const mod = await load('api/scenario-assessment.js', {
-      'rss-parser': { default: class {} },
+      'rss-parser': { default: class { async parseString() { return { items: [{ title: 'Iran Gulf shipping update', link: 'https://test/article', contentSnippet: 'Iran oil flows and Hormuz shipping' }] }; } } },
       openai: { default: class {
         responses = { create: async (body, options) => {
           modelCalls++;
@@ -77,7 +78,7 @@ for (const stalled of [false, true]) {
         saveAssessmentHistory: () => new Promise(() => {})
       },
       '../lib/source-store.js': { getMergedSavedSources: () => new Promise(() => {}) }
-    }, { fetch: (url, options) => untilAborted(options.signal) });
+    }, { fetch: (url, options) => options.headers.Accept.includes('application/rss') ? Promise.resolve({ ok: true, text: async () => '<rss/>' }) : untilAborted(options.signal) });
     let status, payload;
     const res = { status(code) { status = code; return this; }, setHeader() { return this; }, send(body) { payload = JSON.parse(body); } };
     await mod.default({ method: 'GET', query: { topic: 'iran' } }, res);
@@ -86,6 +87,12 @@ for (const stalled of [false, true]) {
     assert.equal(modelCalls, 1);
     assert.equal(payload.scenarios.reduce((sum, s) => sum + s.score, 0), 100);
     assert.equal(payload.history.length, 0);
+    assert.equal(payload.score_type, 'relative_evidence_fit');
+    assert.equal(payload.forecast_horizon, null);
+    assert.equal(payload.signals.length, 14);
+    assert.equal(payload.meta.source_coverage.length, 7);
+    assert.equal(payload.meta.source_coverage.filter(source => source.status === 'not_requested').length, 2);
+    assert.equal(payload.is_fallback, stalled);
     assert.equal(payload.summary.includes('timed out'), stalled);
   });
 }

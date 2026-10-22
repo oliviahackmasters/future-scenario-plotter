@@ -12,6 +12,7 @@
  *  7. collectTopicCoverage() merges RSS + NewsAPI + WorldMonitor.
  */
 
+import { SCORE_DESCRIPTION, relativeScores, completeSignals, monthlyOilSignal } from "../lib/scenario-evidence.js";
 import Parser from "rss-parser";
 import OpenAI from "openai";
 import {
@@ -695,6 +696,8 @@ async function fetchRssItems(source, topicConfig) {
     const xml = await fetchText(urlToFetch, {}, RSS_FETCH_TIMEOUT_MS);
     const feed = await parser.parseString(xml);
     const items = Array.isArray(feed.items) ? feed.items : [];
+    source.fetch_status = "ok";
+    source.items_returned = items.length;
     return items.slice(0, MAX_ITEMS_PER_FEED).map((item) => ({
       source: source.name,
       url: item.link || source.url,
@@ -710,6 +713,8 @@ async function fetchRssItems(source, topicConfig) {
     return await fetchFromUrl(source.url, "direct");
   } catch (error) {
     console.error(`Failed to fetch ${source.name} from direct URL:`, error.message);
+    source.fetch_status = "error";
+    source.items_returned = 0;
     // Feed discovery belongs in source setup, outside the refresh time budget.
     return [];
   }
@@ -878,13 +883,19 @@ const [rssGroups, newsApiItems, worldMonitorItems] = await Promise.all([
 
   console.log("FINAL ARTICLES:", shortlisted.map((item) => `[${item.source}] ${item.title}`));
 
-  return shortlisted.map((item) => ({
+  const articles = shortlisted.map((item) => ({
     source: item.source,
     url: item.url,
     title: item.title,
     published_at: item.isoDate,
     snippet: String(item.contentSnippet || "").slice(0, 220)
   }));
+  return { articles, coverage: rssSources.map(source => ({
+    name: source.name, url: source.url,
+    status: source.fetch_status || "not_requested",
+    items_returned: source.items_returned || 0,
+    articles_used: articles.filter(article => article.source === source.name).length
+  })) };
 }
 
 // ── Oil Signal ─────────────────────────────────────────────────────────────────
@@ -894,41 +905,17 @@ async function fetchOilSignal() {
   if (!apiKey) {
     return {
       source: "Alpha Vantage", status: "unavailable", latest: null,
-      signal: { name: "oil prices", reading: "Oil API key not configured.", direction: "neutral", confidence: "Low", sources: [] }
+      signal: { name: "oil prices", reading: "Oil API key not configured.", direction: "neutral", confidence: "Low", evidence_status: "insufficient", sources: [] }
     };
   }
 
   try {
     const url = `https://www.alphavantage.co/query?function=BRENT&interval=monthly&apikey=${encodeURIComponent(apiKey)}`;
     const data = await fetchJson(url, {}, JSON_FETCH_TIMEOUT_MS);
-    const series  = Array.isArray(data.data) ? data.data : [];
-    const latest  = series[0] ? Number(series[0].value) : null;
-    const previous = series[1] ? Number(series[1].value) : null;
-
-    let direction = "neutral";
-    let reading   = "Brent data available but move is limited.";
-    let confidence = "Medium";
-
-    if (latest != null && previous != null) {
-      const deltaPct = previous === 0 ? 0 : ((latest - previous) / previous) * 100;
-      if (latest >= 85 || deltaPct >= 8) {
-        direction = "escalatory";
-        reading   = `Brent is elevated at ${latest.toFixed(2)} USD/bbl, up from ${previous.toFixed(2)}.`;
-      } else if (latest <= 70 && deltaPct <= -5) {
-        direction = "de-escalatory";
-        reading   = `Brent has eased to ${latest.toFixed(2)} USD/bbl from ${previous.toFixed(2)}.`;
-      } else {
-        reading   = `Brent is ${latest.toFixed(2)} USD/bbl versus ${previous.toFixed(2)} previously.`;
-      }
-    } else {
-      confidence = "Low";
-      reading    = "Oil feed returned insufficient data.";
-    }
-
-    return { source: "Alpha Vantage", status: "ok", latest, previous, signal: { name: "oil prices", reading, direction, confidence, sources: [] } };
+    return monthlyOilSignal(data);
   } catch (error) {
     console.error("Oil signal failed:", error.message);
-    return { source: "Alpha Vantage", status: "error", latest: null, signal: { name: "oil prices", reading: `Oil feed unavailable: ${error.message}`, direction: "neutral", confidence: "Low", sources: [] } };
+    return { source: "Alpha Vantage", status: "error", latest: null, signal: { name: "oil prices", reading: `Oil feed unavailable: ${error.message}`, direction: "neutral", confidence: "Low", evidence_status: "insufficient", sources: [] } };
   }
 }
 
@@ -1039,6 +1026,7 @@ async function fetchPolymarketSignal(topicConfig) {
       matchedMarkets,
       signal: {
         name: "prediction market odds",
+        evidence_status: matchedMarkets.length ? "supported" : "insufficient",
         reading,
         direction: matchedMarkets.length ? "escalatory" : "neutral",
         confidence: matchedMarkets.length >= 3 ? "Medium" : "Low",
@@ -1095,6 +1083,10 @@ function buildPrompt(topicConfig, articles, externalSignals) {
     ),
     "Rules:",
     "- Do not invent evidence.",
+    "- Scores are relative evidence-fit scores on a 0-100 scale, not calibrated probabilities; no forecast horizon is specified.",
+    "- Include every tracked signal. Use evidence_status insufficient, Low confidence, neutral direction and an explicit Unknown reading where evidence is missing.",
+    "- Absence of reporting is not evidence of stability or absence of risk. Do not infer managed escalation merely from continued exports.",
+    "- Respect observation dates and averaging periods. Never describe monthly Brent averages as live or current spot prices.",
     "- Only include sources that directly support a signal reading.",
     "- Scores should reflect the supplied evidence only.",
     "- For calculation.scenarios, include only: name, ai_score, market_boost, final_score, reasoning.",
@@ -1126,6 +1118,7 @@ const responseSchema = {
         type: "object", additionalProperties: false,
         properties: {
           name: { type: "string" }, reading: { type: "string" },
+          evidence_status: { type: "string", enum: ["supported", "insufficient"] },
           direction: { type: "string", enum: ["escalatory", "neutral", "de-escalatory"] },
           confidence: { type: "string", enum: ["Low", "Medium", "High"] },
           sources: {
@@ -1137,7 +1130,7 @@ const responseSchema = {
             }
           }
         },
-        required: ["name", "reading", "direction", "confidence", "sources"]
+        required: ["name", "reading", "direction", "confidence", "sources", "evidence_status"]
       }
     },
     calculation: {
@@ -1166,9 +1159,10 @@ const responseSchema = {
 function normalizeScenarioScores(output, scenariosFromConfig, polymarketWeights = {}) {
   const byName = new Map(output.scenarios.map((item) => [String(item.name || "").trim().toLowerCase(), item]));
 
-  const merged = scenariosFromConfig.map((scenario) => {
+  const baseScores = relativeScores(output.scenarios, scenariosFromConfig.map(s => s.name));
+  const merged = scenariosFromConfig.map((scenario, index) => {
     const found      = byName.get(scenario.name.toLowerCase());
-    const aiScore    = Number(found?.score || 0);
+    const aiScore    = baseScores[index];
     const marketBoost = Number(polymarketWeights[scenario.name] || 0) * 20;
     return { name: scenario.name, description: found?.description || scenario.description, score: aiScore + marketBoost };
   });
@@ -1290,9 +1284,10 @@ function buildFallbackAssessment(topicConfig, articles, externalSignals, summary
   });
 
   return {
-    summary: `${summaryPrefix} Current reporting still points to sustained pressure in the ${topicConfig.label} domain.`.trim(),
+    mode: "fallback",
+    summary: `${summaryPrefix} A live assessment could not be completed. Scores shown are placeholders; the available evidence does not establish a scenario ranking.`.trim(),
     scenarios: fallbackScenarios,
-    signals: fallbackSignals,
+    signals: completeSignals(topicConfig, fallbackSignals, articles, externalSignals),
     calculation: {
       scenarios: topicConfig.scenarios.map((s) => {
         const fs = fallbackScenarios.find((x) => x.name === s.name);
@@ -1311,12 +1306,13 @@ function buildFallbackAssessment(topicConfig, articles, externalSignals, summary
 // ── Assessment Generation ──────────────────────────────────────────────────────
 
 async function generateScenarioAssessment(topicConfig, articles, externalSignals) {
-  if (!articles.length && !externalSignals.length) {
+  if (!articles.length && !externalSignals.some(item => item.status === "ok" && (item.signal?.sources?.length || item.matchedMarkets?.length))) {
     return {
   mode: "no_evidence",
   summary: "Not enough current source material was available to generate a live assessment.",
   scenarios: topicConfig.scenarios.map((s) => ({ ...s, score: 25 })),
   signals: topicConfig.trackedSignals.map((s) => ({
+    evidence_status: "insufficient",
     name: s,
     reading: "No recent evidence available.",
     direction: "neutral",
@@ -1360,11 +1356,7 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
     !Array.isArray(parsed.scenarios) ||
     parsed.scenarios.every((s) => Number(s.score || 0) <= 0)
   ) {
-    parsed.scenarios = topicConfig.scenarios.map((s, i) => ({
-      name: s.name,
-      description: s.description,
-      score: [15, 20, 35, 30][i] || 25
-    }));
+    return buildFallbackAssessment(topicConfig, articles, externalSignals, "The model returned no valid scenario scores.");
   }
 
   const polymarket = externalSignals.find((s) => s.source === "Polymarket");
@@ -1374,7 +1366,8 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
     polymarket?.weights || {}
   );
 
-  const calculationScenarios = topicConfig.scenarios.map((scenario) => {
+  const baseScores = relativeScores(parsed.scenarios, topicConfig.scenarios.map(s => s.name));
+  const calculationScenarios = topicConfig.scenarios.map((scenario, index) => {
     const rawCalc = (parsed.calculation?.scenarios || []).find(
       (item) => String(item.name || "").trim().toLowerCase() === scenario.name.toLowerCase()
     );
@@ -1384,10 +1377,8 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
 
     return {
       name: scenario.name,
-      ai_score: Number(rawCalc?.ai_score || 0),
-      market_boost: Number(
-        rawCalc?.market_boost || Number(polymarket?.weights?.[scenario.name] || 0) * 20
-      ),
+      ai_score: baseScores[index],
+      market_boost: Number(polymarket?.weights?.[scenario.name] || 0) * 20,
       final_score: Number(normalized?.score || 0),
       reasoning:
         typeof rawCalc?.reasoning === "string" && rawCalc.reasoning.trim()
@@ -1405,7 +1396,7 @@ async function generateScenarioAssessment(topicConfig, articles, externalSignals
     mode: "ai",
     summary: parsed.summary,
     scenarios: normalizedScenarios,
-    signals,
+    signals: completeSignals(topicConfig, signals, articles, externalSignals),
     calculation: { scenarios: calculationScenarios }
   };
 }
@@ -1440,7 +1431,7 @@ export default async function handler(req, res) {
     const polyTimer      = startTimer("fetch-polymarket-signal");
     const polymarketSignalPromise = fetchPolymarketSignal(topicConfig).finally(() => endTimer(polyTimer));
 
-    const articles = await articlesPromise;
+    const { articles, coverage } = await articlesPromise;
     endTimer(coverageTimer);
 
     const [oilSignal, polymarketSignal] = await Promise.all([oilSignalPromise, polymarketSignalPromise]);
@@ -1460,6 +1451,8 @@ export default async function handler(req, res) {
 
     const historyEntry = {
       date: today, updated_at: nowIso,
+      is_fallback: assessment.mode !== "ai",
+      score_type: "relative_evidence_fit",
       summary: assessment.summary,
       short_summary: String(assessment.summary || "").replace(/\s+/g, " ").trim().slice(0, 180),
       top_headline: topArticle ? `${topArticle.source}: ${topArticle.title}` : "No headline available.",
@@ -1483,6 +1476,11 @@ const citedSources = Array.from(
 
 const responsePayload = {
   topic: topicConfig.label,
+  mode: assessment.mode || "fallback",
+  is_fallback: assessment.mode !== "ai",
+  score_type: "relative_evidence_fit",
+  score_description: SCORE_DESCRIPTION,
+  forecast_horizon: null,
   updated_at: new Date().toISOString(),
   summary: assessment.summary,
   scenarios: assessment.scenarios,
@@ -1500,6 +1498,9 @@ const responsePayload = {
   : [])
 ],
   meta: {
+    source_coverage: coverage,
+    article_count: articles.length,
+    evidence_basis: "Article headlines and snippets, plus the dated external signals shown below.",
     oil: oilSignal,
     polymarket: {
       source: polymarketSignal.source,
