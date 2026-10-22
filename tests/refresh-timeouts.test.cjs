@@ -58,9 +58,11 @@ test('a connected Redis server that stops replying cannot stall saved sources', 
   assert.equal((await mod.getMergedSavedSources('iran')).length, 0);
 });
 
+for (const extraFeedCount of [0, 35]) {
 for (const stalled of [false, true]) {
-  test(`refresh returns with stalled external APIs, storage and ${stalled ? 'stalled' : 'successful'} model`, async () => {
+  test(`refresh with ${extraFeedCount} extra feeds returns with stalled external APIs, storage and ${stalled ? 'stalled' : 'successful'} model`, async () => {
     let modelCalls = 0;
+    const attemptedFeeds = new Set();
     const model = { summary: 'Evidence assessment', scenarios: ['Chaos + Collapse', 'Shattered Diplomacy', 'Burning Strait', 'Cold Containment'].map(name => ({ name, score: 25 })), signals: [], calculation: { scenarios: [] } };
     const mod = await load('api/scenario-assessment.js', {
       'rss-parser': { default: class { async parseString() { return { items: [{ title: 'Iran Gulf shipping update', link: 'https://test/article', contentSnippet: 'Iran oil flows and Hormuz shipping' }] }; } } },
@@ -77,8 +79,16 @@ for (const stalled of [false, true]) {
         saveLatestAssessment: () => new Promise(() => {}),
         saveAssessmentHistory: () => new Promise(() => {})
       },
-      '../lib/source-store.js': { getMergedSavedSources: () => new Promise(() => {}) }
-    }, { fetch: (url, options) => options.headers.Accept.includes('application/rss') ? Promise.resolve({ ok: true, text: async () => '<rss/>' }) : untilAborted(options.signal) });
+      '../lib/source-store.js': { getMergedSavedSources: () => extraFeedCount
+        ? Promise.resolve(Array.from({ length: extraFeedCount }, (_, index) => ({ name: `Extra ${index}`, url: `https://test/feed-${index}`, type: 'rss' })))
+        : new Promise(() => {}) }
+    }, { fetch: (url, options) => {
+      if (!options.headers.Accept.includes('application/rss')) return untilAborted(options.signal);
+      attemptedFeeds.add(url);
+      // An unavailable saved feed must not prevent the others from contributing.
+      if (url.endsWith('/feed-0')) return untilAborted(options.signal);
+      return Promise.resolve({ ok: true, text: async () => '<rss/>' });
+    } });
     let status, payload;
     const res = { status(code) { status = code; return this; }, setHeader() { return this; }, send(body) { payload = JSON.parse(body); } };
     await mod.default({ method: 'GET', query: { topic: 'iran' } }, res);
@@ -90,9 +100,13 @@ for (const stalled of [false, true]) {
     assert.equal(payload.score_type, 'relative_evidence_fit');
     assert.equal(payload.forecast_horizon, null);
     assert.equal(payload.signals.length, 14);
-    assert.equal(payload.meta.source_coverage.length, 7);
-    assert.equal(payload.meta.source_coverage.filter(source => source.status === 'not_requested').length, 2);
+    assert.equal(payload.meta.source_coverage.length, 7 + extraFeedCount);
+    assert.equal(attemptedFeeds.size, extraFeedCount ? 40 : 7);
+    assert.equal(payload.meta.source_coverage.filter(source => source.status === 'error').length, extraFeedCount ? 1 : 0);
+    assert.equal(payload.meta.source_coverage.filter(source => source.status === 'not_requested').length, extraFeedCount ? 2 : 0);
     assert.equal(payload.is_fallback, stalled);
     assert.equal(payload.summary.includes('timed out'), stalled);
   });
+}
+
 }
