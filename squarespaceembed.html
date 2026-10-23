@@ -1029,7 +1029,7 @@
 
           <div class="hm-note" id="hmSourceDiscoveryStatus"></div>
           <div class="hm-saved-sources" id="hmSavedSources"></div>
-          <div class="hm-built-in-sources" id="hmBuiltInSources"></div>
+          <div class="hm-note">Sources checked in the latest assessment. Results may be excluded if they are not relevant or current.</div>
         </div>
 
         <div class="hm-row">
@@ -1205,7 +1205,7 @@ const sourceNameInput = document.getElementById("hmSourceName");
 const sourceWebsiteInput = document.getElementById("hmSourceWebsite");
 const addSourceBtn = document.getElementById("hmAddSourceBtn");
 const savedSourcesEl = document.getElementById("hmSavedSources");
-const builtInSourcesEl = document.getElementById("hmBuiltInSources");
+let hmLatestSourceCoverage = [];
 const sourceDiscoveryStatus = document.getElementById("hmSourceDiscoveryStatus");
 const sourceManagerEl = document.querySelector(".hm-source-manager");
 const sourceManagerToggleBtn = document.getElementById("hmSourceManagerToggle");
@@ -1237,47 +1237,41 @@ async function hmFetchJson(url, init = {}) {
 }
 
 function hmRenderSavedSources(payload) {
-  const items = hmMergeSavedSources(payload);
+  const saved = new Map(hmMergeSavedSources(payload).map(item => [item.url, item]));
+  const items = hmLatestSourceCoverage.filter(item =>
+    ["ok", "error"].includes(item.status) && saved.get(item.url)?.enabled !== false
+  );
 
   if (!items.length) {
-    savedSourcesEl.innerHTML = '<div class="hm-note">No saved sources yet.</div>';
+    savedSourcesEl.innerHTML = '<div class="hm-note">No searched sources recorded yet. Refresh analysis to check sources.</div>';
     return;
   }
 
-  savedSourcesEl.innerHTML = items
-    .map((item) => {
-      const confidenceText =
-        typeof item.confidence === "number" && item.confidence > 0
-          ? ` · confidence ${Math.round(item.confidence * 100)}%`
-          : "";
-
-      return `
-        <div class="hm-source-row">
-          <div class="hm-source-meta">
-            <div class="hm-source-name">${hmEscapeHtml(item.name)}</div>
-            <div class="hm-source-url">
-              <a href="${hmEscapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${hmEscapeHtml(item.url)}</a>
-            </div>
-            <div class="hm-source-status">
-              ${hmEscapeHtml(item.type || "rss")} · ${item.enabled === false ? "disabled" : "enabled"}${confidenceText}
-            </div>
-          </div>
-          <div class="hm-source-actions">
-            <button class="hm-btn" onclick="hmToggleSourceEnabled('${hmEscapeHtml(item.id)}', ${item.enabled === false ? "true" : "false"})">
-              ${item.enabled === false ? "Enable" : "Disable"}
-            </button>
-            <button class="hm-btn" onclick="hmDeleteSource('${hmEscapeHtml(item.id)}')">Delete</button>
-          </div>
+  savedSourcesEl.innerHTML = items.map(item => {
+    const stored = saved.get(item.url);
+    const editable = stored?.id && stored.discovered_by !== "osint-source-pack";
+    const link = stored?.homepage || item.url;
+    const method = item.url.includes("/api/tavily-rss?") ? "Web search" : "RSS feed";
+    const resultText = item.status === "error" ? "Search attempted · unavailable" :
+      `Searched · ${item.items_returned || 0} results · ${item.articles_used || 0} articles used`;
+    return `
+      <div class="hm-source-row">
+        <div class="hm-source-meta">
+          <div class="hm-source-name">${hmEscapeHtml(item.name)}</div>
+          <div class="hm-source-url"><a href="${hmEscapeHtml(link)}" target="_blank" rel="noopener noreferrer">${hmEscapeHtml(link)}</a></div>
+          <div class="hm-source-status">${method} · ${resultText}</div>
         </div>
-      `;
-    })
-    .join("");
+        ${editable ? `<div class="hm-source-actions">
+          <button class="hm-btn" onclick="hmToggleSourceEnabled('${hmEscapeHtml(stored.id)}', false)">Disable</button>
+          <button class="hm-btn" onclick="hmDeleteSource('${hmEscapeHtml(stored.id)}')">Delete</button>
+        </div>` : ""}
+      </div>`;
+  }).join("");
 }
 
 async function hmLoadSavedSources() {
   const payload = await hmFetchJson(SOURCES_API_URL);
   hmRenderSavedSources(payload);
-  hmRenderBuiltInSources(payload);
 }
 
 function hmToggleSourceManager() {
@@ -1288,99 +1282,6 @@ function hmToggleSourceManager() {
 
 if (sourceManagerToggleBtn) {
   sourceManagerToggleBtn.addEventListener("click", hmToggleSourceManager);
-}
-
-function hmRenderBuiltInSources(payload) {
-  const builtIn = Array.isArray(payload?.built_in) ? payload.built_in : [];
-  const savedNames = new Set(
-    hmMergeSavedSources(payload).map((item) => String(item.name || "").trim().toLowerCase())
-  );
-
-  if (!builtIn.length) {
-    builtInSourcesEl.innerHTML = '<div class="hm-note">No built-in source options available.</div>';
-    return;
-  }
-
-  builtInSourcesEl.innerHTML = `
-    <div class="hm-msg-title">Built-in source options</div>
-    <div class="hm-note">Select built-in feeds to add them quickly. Already-saved sources are disabled.</div>
-    <div class="hm-builtin-controls">
-      <button class="hm-btn" id="hmAddSelectedBuiltInBtn" type="button">Add checked sources</button>
-      <button class="hm-btn" id="hmAddAllBuiltInBtn" type="button">Add all built-in sources</button>
-    </div>
-    <div class="hm-builtin-list">
-      ${builtIn
-        .map((source) => {
-          const normalized = String(source.name || "").trim().toLowerCase();
-          const disabled = savedNames.has(normalized) ? "disabled" : "";
-          return `
-            <label class="hm-built-in-item">
-              <input type="checkbox" name="hmBuiltInSource" value="${hmEscapeHtml(source.name)}" ${disabled} />
-              <span>${hmEscapeHtml(source.name)}${source.homepage ? ` · <a href="${hmEscapeHtml(source.homepage)}" target="_blank" rel="noopener noreferrer">visit</a>` : ""}</span>
-            </label>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
-
-  document
-    .getElementById("hmAddSelectedBuiltInBtn")
-    .addEventListener("click", () => hmAddSelectedBuiltInSources(builtIn, savedNames, false));
-  document
-    .getElementById("hmAddAllBuiltInBtn")
-    .addEventListener("click", () => hmAddSelectedBuiltInSources(builtIn, savedNames, true));
-}
-
-async function hmAddSelectedBuiltInSources(builtIn, savedNames, addAll = false) {
-  const selectedNames = addAll
-    ? builtIn.map((source) => source.name)
-    : Array.from(document.querySelectorAll('input[name="hmBuiltInSource"]'))
-        .filter((checkbox) => checkbox.checked)
-        .map((checkbox) => checkbox.value);
-
-  const sourcesToAdd = builtIn.filter((source) => {
-    const normalized = String(source.name || "").trim().toLowerCase();
-    return selectedNames.includes(source.name) && !savedNames.has(normalized);
-  });
-
-  if (!sourcesToAdd.length) {
-    sourceDiscoveryStatus.textContent = "No new built-in sources selected.";
-    return;
-  }
-
-  addSourceBtn.disabled = true;
-  sourceDiscoveryStatus.textContent = `Adding ${sourcesToAdd.length} built-in source${sourcesToAdd.length === 1 ? "" : "s"}...`;
-
-  try {
-    for (const source of sourcesToAdd) {
-      await hmFetchJson(SOURCES_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: source.name,
-          url: source.feedUrl,
-          type: "rss",
-          enabled: true,
-          homepage: source.homepage || "",
-          confidence: 1,
-          discovered_by: "catalog",
-          validated_at: new Date().toISOString()
-        })
-      });
-    }
-
-    sourceDiscoveryStatus.textContent = `Added ${sourcesToAdd.length} built-in source${sourcesToAdd.length === 1 ? "" : "s"}.`;
-    await hmLoadSavedSources();
-    await hmRefreshAssessment();
-  } catch (err) {
-    sourceDiscoveryStatus.textContent = "Could not add built-in sources.";
-    error.style.display = "block";
-
-    error.textContent = err.message || "Failed to add built-in sources.";
-  } finally {
-    addSourceBtn.disabled = false;
-  }
 }
 
 const HM_SCENARIO_COLORS = {
@@ -1753,6 +1654,8 @@ const calcPanel = document.getElementById("hmCalcPanel");
     function render(data) {
       renderCalculation(data.calculation);
       const coverage = data.meta?.source_coverage || [];
+      hmLatestSourceCoverage = coverage;
+      hmRenderSavedSources({ topic: data.meta?.saved_sources || [] });
       const checked = coverage.filter(source => source.status !== "not_requested");
       const used = data.meta?.used_article_sources || [];
       document.getElementById("hmEvidenceCoverage").textContent =
@@ -1762,12 +1665,12 @@ const calcPanel = document.getElementById("hmCalcPanel");
         "Evidence is based on headlines, snippets and the external signals listed below.";
       
       scenarioGrid.innerHTML = (data.scenarios || []).map(item => `
-        <div class="hm-result-card">
+        <div class="hm-result-card" style="border-color:${HM_SCENARIO_COLORS[item.name] || '#D18057'};">
           <div class="hm-score-row">
-            <div class="hm-score-name">${item.name}</div>
-            <div class="hm-score-value">${item.score}%</div>
+            <div class="hm-score-name" style="color:${HM_SCENARIO_COLORS[item.name] || '#D18057'};">${item.name}</div>
+            <div class="hm-score-value" style="color:${HM_SCENARIO_COLORS[item.name] || '#D18057'};">${item.score}%</div>
           </div>
-          <div class="hm-bar"><span style="width:${Math.max(0, Math.min(100, item.score))}%"></span></div>
+          <div class="hm-bar"><span style="width:${Math.max(0, Math.min(100, item.score))}%;background:${HM_SCENARIO_COLORS[item.name] || '#D18057'};"></span></div>
           <div class="hm-scenario-desc">${item.description}</div>
         </div>
       `).join("");
@@ -1862,7 +1765,12 @@ function renderPlotHeatmap(scenarios) {
     // normalize 0–100 score to 0–0.6 opacity
     const alpha = Math.max(0, Math.min(0.6, score / 100 * 0.6));
 
-    cell.style.background = `rgba(209,128,87,${alpha})`;
+    const color = HM_SCENARIO_COLORS[name] || "#D18057";
+    const rgb = [1, 3, 5].map(index => parseInt(color.slice(index, index + 2), 16));
+    cell.style.background = `rgba(${rgb.join(",")},${alpha})`;
+    cell.style.borderLeft = `3px solid ${color}`;
+    const title = cell.querySelector(".hm-plot-cell-title");
+    if (title) title.style.color = color;
   });
 }
 
