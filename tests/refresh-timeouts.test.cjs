@@ -163,3 +163,23 @@ test('POST sources generates an ID without global crypto and persists to the sel
   const reloaded = await store.getSavedSources('iran');
   assert.equal(reloaded.topic[1].url, 'https://example.org/new.xml');
 });
+
+for (const [label, env, expectedUrl] of [
+  ['new variable only', { DB_REDIS_URL: 'redis://new-database' }, 'redis://new-database'],
+  ['new variable overrides old credentials', { DB_REDIS_URL: 'redis://new-database', REDIS_URL: 'redis://deleted-database' }, 'redis://new-database'],
+  ['legacy variable fallback', { REDIS_URL: 'redis://legacy-database' }, 'redis://legacy-database']
+]) {
+  test(`source store uses ${label}`, async () => {
+    let connectedUrl;
+    const store = await load('lib/source-store.js', { redis: { createClient(options) {
+      connectedUrl = options.url;
+      const client = new EventEmitter();
+      client.connect = async () => {};
+      client.commandOptions = options => options;
+      client.get = async () => null;
+      return client;
+    } } }, { process: { env } });
+    await store.getSavedSources('iran');
+    assert.equal(connectedUrl, expectedUrl);
+  });
+}
