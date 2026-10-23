@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
 async function load(file, dependencies, globals = {}) {
+  dependencies["node:crypto"] = { randomUUID: require("node:crypto").randomUUID };
   dependencies["../lib/scenario-evidence.js"] = await import("../lib/scenario-evidence.js");
   const context = vm.createContext({
     console: { log() {}, warn() {}, error() {} }, process: { env: {
@@ -128,4 +129,37 @@ test('search RSS preserves real publication dates and leaves unknown dates unsta
   assert.equal((body.match(/<pubDate>/g) || []).length, 1);
   assert.match(body, /<pubDate>2026-10-21<\/pubDate>/);
   assert.match(body, /Oil &amp; shipping/);
+});
+
+test('POST sources generates an ID without global crypto and persists to the selected topic', async () => {
+  const saved = new Map();
+  const existing = { id: 'existing-source', name: 'Existing', url: 'https://example.org/existing.xml' };
+  saved.set('scenario:sources:iran', JSON.stringify([existing]));
+  const store = await load('lib/source-store.js', {
+    'node:crypto': { randomUUID: require('node:crypto').randomUUID },
+    redis: { createClient() {
+      const client = new EventEmitter();
+      client.connect = async () => {};
+      client.commandOptions = options => options;
+      client.get = async (options, key) => saved.get(key) || null;
+      client.set = async (options, key, value) => { saved.set(key, value); };
+      return client;
+    } }
+  });
+  const api = await load('api/sources.js', {
+    '../lib/source-store.js': store,
+    '../lib/source-catalog.js': { SOURCE_CATALOG: [] }
+  });
+  let status, payload;
+  const res = { status(code) { status = code; return this; }, setHeader() { return this; }, send(body) { payload = JSON.parse(body); } };
+  await api.default({ method: 'POST', query: { topic: 'iran' }, headers: {}, body: { name: 'New RSS', url: 'https://example.org/new.xml' } }, res);
+  assert.equal(status, 200, JSON.stringify(payload));
+  assert.equal(payload.ok, true);
+  const persisted = JSON.parse(saved.get('scenario:sources:iran'));
+  assert.equal(persisted.length, 2);
+  assert.equal(persisted[0].id, existing.id);
+  assert.match(persisted[1].id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.equal(saved.has('scenario:sources:global'), false);
+  const reloaded = await store.getSavedSources('iran');
+  assert.equal(reloaded.topic[1].url, 'https://example.org/new.xml');
 });
